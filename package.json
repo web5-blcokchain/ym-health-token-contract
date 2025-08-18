@@ -1,0 +1,43 @@
+{
+  "name": "healthlife-token",
+  "version": "1.0.0",
+  "description": "HealthLife Token (HLT) - 健康医疗区块链代币项目",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.js",
+    "deploy:goerli": "hardhat run scripts/deploy.js --network goerli",
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
+    "verify": "hardhat verify",
+    "clean": "hardhat clean",
+    "node": "hardhat node",
+    "coverage": "hardhat coverage"
+  },
+  "keywords": [
+    "blockchain",
+    "ethereum",
+    "smart-contracts",
+    "healthcare",
+    "token",
+    "crowdsale",
+    "vesting"
+  ],
+  "author": "HealthLife Token Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@chainlink/contracts": "^1.4.0",
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@nomiclabs/hardhat-ethers": "^2.0.0",
+    "@openzeppelin/contracts": "^5.4.0",
+    "chai": "^4.2.0",
+    "dotenv": "^17.2.1",
+    "ethers": "^5.7.2",
+    "hardhat": "^2.19.0"
+  }
+}

@@ -128,14 +128,15 @@ contract Crowdsale is ReentrancyGuard, Ownable {
             totalParticipants++;
         }
         
-        // 设置锁仓时间
-        userLockTime[msg.sender] = block.timestamp;
+        // 设置锁仓时间（只在首次购买时设置）
+        if (userLockTime[msg.sender] == 0) {
+            userLockTime[msg.sender] = block.timestamp;
+            // 在HLTToken合约中设置用户锁仓时间
+            token.setUserLockTime(msg.sender, block.timestamp);
+        }
         
         // 给用户代币（锁仓状态）
         require(token.transfer(msg.sender, hltAmount), "Token transfer failed");
-        
-        // 在HLTToken合约中设置用户锁仓时间
-        token.setUserLockTime(msg.sender, block.timestamp);
         
         emit TokensPurchased(msg.sender, _usdtAmount, hltAmount, userLockTime[msg.sender], block.timestamp);
     }

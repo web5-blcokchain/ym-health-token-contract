@@ -3,10 +3,10 @@ const { ethers } = require("hardhat");
 async function main() {
     console.log("🧪 === BSC测试网集成测试开始 ===\n");
 
-    // 部署的合约地址
+    // 部署的合约地址（最新部署）
     const MOCKUSDT_ADDRESS = "0xeb4C53574edBF035FfBAF647b3E957b4FB88CD6B";
-    const HLTTOKEN_ADDRESS = "0xB9345Bfe74aC71D2C1bE0212F5bff3F67cB85ba4";
-    const CROWDSALE_ADDRESS = "0x32135980bB2468DbF4e53786148eA0C000F8Fdef";
+    const HLTTOKEN_ADDRESS = "0x64a4296C32A23C6296C089d6699d415377f8a8F6";
+    const CROWDSALE_ADDRESS = "0x699a392289Ec3800A03AcD52aa1695ebBA2fC516";
 
     // 获取签名者
     const [deployer] = await ethers.getSigners();

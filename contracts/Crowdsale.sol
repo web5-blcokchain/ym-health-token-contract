@@ -19,7 +19,8 @@ contract Crowdsale is ReentrancyGuard, Ownable {
     IERC20 public usdtToken;
     
     // 众筹参数
-    uint256 public tokensPerUSDT = 12; // 1 USDT = 12 HLT (可设置)
+    // tokensPerUSDT 表示 HLT 代币的价格：1 USDT = 12 HLT
+    uint256 public tokensPerUSDT = 12; // 1 USDT = 12 HLT (价格比例)
     uint256 public constant MIN_PURCHASE_USDT = 1000000; // 最小购买1 USDT (考虑6位小数)
     uint256 public constant MAX_PURCHASE_USDT = 1000000000000; // 最大购买100万USDT (考虑6位小数)
     uint256 public constant LOCK_DURATION = 365 days; // 12个月锁仓期
@@ -104,7 +105,9 @@ contract Crowdsale is ReentrancyGuard, Ownable {
         require(_usdtAmount <= MAX_PURCHASE_USDT, "Amount too large");
         
         // 计算应得HLT数量
-        uint256 hltAmount = _usdtAmount * tokensPerUSDT;
+        // 方案B：标准单位计算，处理精度转换
+        // USDT(6位小数) -> HLT(18位小数)，需要 * 1e18 / 1e6
+        uint256 hltAmount = (_usdtAmount * tokensPerUSDT * 1e18) / 1e6;
         
         // 检查代币余额
         require(token.balanceOf(address(this)) >= hltAmount, "Insufficient token balance");

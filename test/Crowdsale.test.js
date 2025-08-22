@@ -15,7 +15,7 @@ describe("Crowdsale", function () {
         const MockUSDT = await ethers.getContractFactory("MockUSDT");
         const usdtName = "Tether USD";
         const usdtSymbol = "USDT";
-        usdtToken = await MockUSDT.deploy(usdtName, usdtSymbol, 6);
+        usdtToken = await MockUSDT.deploy(owner.address);
         
         // 部署众筹合约
         const Crowdsale = await ethers.getContractFactory("Crowdsale");
@@ -156,7 +156,7 @@ describe("Crowdsale", function () {
             
             const userInfo = await crowdsale.getUserInfo(user1.address);
             expect(userInfo[0].toString()).to.equal(usdtAmount.toString()); // USDT数量
-            expect(userInfo[1].toString()).to.equal(expectedHLT.toString()); // HLT数量
+            expect(userInfo[1]).to.eq(expectedHLT); // HLT数量
             expect(userInfo[2]).to.be.true; // 参与状态
         });
         
@@ -167,7 +167,7 @@ describe("Crowdsale", function () {
             await crowdsale.connect(user1).buyTokens(usdtAmount);
             
             const userInfo = await crowdsale.getUserInfo(user1.address);
-            expect(userInfo[1].toString()).to.equal(expectedHLT.toString());
+            expect(userInfo[1]).to.eq(expectedHLT);
         });
         
         it("应该正确计算USDT数量", async function () {
@@ -238,7 +238,7 @@ describe("Crowdsale", function () {
             await crowdsale.connect(user1).buyTokens(usdtAmount);
             
             const userInfo = await crowdsale.getUserInfo(user1.address);
-            expect(userInfo[1].toString()).to.equal(expectedHLT.toString());
+            expect(userInfo[1]).to.eq(expectedHLT);
         });
     });
     
@@ -253,7 +253,7 @@ describe("Crowdsale", function () {
             const userInfo = await crowdsale.getUserInfo(user1.address);
             
             expect(userInfo[0].toString()).to.equal(ethers.utils.parseUnits("100", 6).toString()); // USDT购买量
-            expect(userInfo[1].toString()).to.equal(ethers.utils.parseUnits("100", 6).mul(12).toString()); // HLT数量
+            expect(userInfo[1].toString()).to.equal(ethers.utils.parseUnits("1200", 18).toString()); // HLT数量
             expect(userInfo[2]).to.be.true; // 已参与
         });
         
@@ -269,7 +269,7 @@ describe("Crowdsale", function () {
             expect(status[0]).to.be.true; // 众筹激活
             expect(status[1]).to.be.false; // 众筹未结束
             expect(status[4].toString()).to.equal(ethers.utils.parseUnits("100", 6).toString()); // 总USDT
-            expect(status[5].toString()).to.equal(ethers.utils.parseUnits("100", 6).mul(12).toString()); // 总HLT
+            expect(status[5].toString()).to.equal(ethers.utils.parseUnits("1200", 18).toString()); // 总HLT
             expect(status[6].toNumber()).to.equal(1); // 参与人数
         });
         
@@ -338,7 +338,7 @@ describe("Crowdsale", function () {
             
             const userInfo = await crowdsale.getUserInfo(user1.address);
             const totalUSDT = usdtAmount1.add(usdtAmount2);
-            const totalHLT = totalUSDT.mul(12);
+            const totalHLT = totalUSDT.mul(ethers.utils.parseUnits("12", 12));
             
             expect(userInfo[0].toString()).to.equal(totalUSDT.toString());
             expect(userInfo[1].toString()).to.equal(totalHLT.toString());
@@ -354,11 +354,11 @@ describe("MockUSDT", function () {
         [owner] = await ethers.getSigners();
         
         const MockUSDT = await ethers.getContractFactory("MockUSDT");
-        mockUSDT = await MockUSDT.deploy("Tether USD", "USDT", 6);
+        mockUSDT = await MockUSDT.deploy(owner.address);
     });
     
     it("应该正确设置代币参数", async function () {
-        expect(await mockUSDT.name()).to.equal("Tether USD");
+        expect(await mockUSDT.name()).to.equal("Mock USDT");
         expect(await mockUSDT.symbol()).to.equal("USDT");
         expect(await mockUSDT.decimals()).to.equal(6);
     });

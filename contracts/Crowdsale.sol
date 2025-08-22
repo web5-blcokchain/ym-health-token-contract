@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./HLTToken.sol";
 
 /**
@@ -12,6 +13,8 @@ import "./HLTToken.sol";
  * @notice 支持USDT购买，价格可设置，购买后12个月锁仓
  */
 contract Crowdsale is ReentrancyGuard, Ownable {
+    using SafeERC20 for IERC20;
+    
     // 代币合约
     HLTToken public token;
     
@@ -107,7 +110,8 @@ contract Crowdsale is ReentrancyGuard, Ownable {
         // 计算应得HLT数量
         // 方案B：标准单位计算，处理精度转换
         // USDT(6位小数) -> HLT(18位小数)，需要 * 1e18 / 1e6
-        uint256 hltAmount = (_usdtAmount * tokensPerUSDT * 1e18) / 1e6;
+        // 调整计算顺序避免精度损失：先乘以1e12，再乘以tokensPerUSDT
+        uint256 hltAmount = _usdtAmount * 1e12 * tokensPerUSDT;
         
         // 检查代币余额
         require(token.balanceOf(address(this)) >= hltAmount, "Insufficient token balance");
@@ -116,7 +120,7 @@ contract Crowdsale is ReentrancyGuard, Ownable {
         require(usdtToken.allowance(msg.sender, address(this)) >= _usdtAmount, "Insufficient USDT allowance");
         
         // 转移USDT
-        require(usdtToken.transferFrom(msg.sender, address(this), _usdtAmount), "USDT transfer failed");
+        usdtToken.safeTransferFrom(msg.sender, address(this), _usdtAmount);
         
         // 更新统计
         totalUSDTRaised += _usdtAmount;
@@ -139,7 +143,7 @@ contract Crowdsale is ReentrancyGuard, Ownable {
         }
         
         // 给用户代币（锁仓状态）
-        require(token.transfer(msg.sender, hltAmount), "Token transfer failed");
+        IERC20(address(token)).safeTransfer(msg.sender, hltAmount);
         
         emit TokensPurchased(msg.sender, _usdtAmount, hltAmount, userLockTime[msg.sender], block.timestamp);
     }
@@ -167,7 +171,7 @@ contract Crowdsale is ReentrancyGuard, Ownable {
         uint256 balance = usdtToken.balanceOf(address(this));
         require(balance > 0, "No USDT to withdraw");
         
-        require(usdtToken.transfer(owner(), balance), "USDT transfer failed");
+        usdtToken.safeTransfer(owner(), balance);
         
         emit USDTWithdrawn(owner(), balance);
     }
@@ -274,7 +278,10 @@ contract Crowdsale is ReentrancyGuard, Ownable {
      * @param _usdtAmount USDT数量
      */
     function calculateHLTAmount(uint256 _usdtAmount) external view returns (uint256) {
-        return _usdtAmount * tokensPerUSDT;
+        // 与buyTokens中的计算逻辑保持一致
+        // USDT(6位小数) -> HLT(18位小数)，需要 * 1e18 / 1e6
+        // 调整计算顺序避免精度损失：先乘以1e12，再乘以tokensPerUSDT
+        return (_usdtAmount * 1e12 * tokensPerUSDT);
     }
     
     /**
@@ -283,10 +290,9 @@ contract Crowdsale is ReentrancyGuard, Ownable {
      */
     function calculateUSDTAmount(uint256 _hltAmount) external view returns (uint256) {
         // HLT是18位小数，USDT是6位小数，需要调整精度
-        // 先将HLT转换为USDT，然后调整精度
-        uint256 usdtAmount = _hltAmount / tokensPerUSDT;
-        // 调整精度：HLT的18位小数转换为USDT的6位小数
-        return usdtAmount / (10 ** 12); // 18 - 6 = 12
+        // 修复精度损失问题：先调整精度再除以价格
+        // HLT(18位小数) -> USDT(6位小数)，需要 * 1e6 / 1e18
+        return (_hltAmount * 1e6) / (tokensPerUSDT * 1e18);
     }
     
     /**

@@ -108,7 +108,8 @@ contract HLTToken is ERC20, Ownable {
         require(!otherTokensTransferred, "Other tokens already transferred");
         require(otherAccount != address(0), "Other account not set");
         
-        require(transfer(otherAccount, OTHER_AMOUNT), "Transfer failed");
+        // 使用_transfer绕过锁仓检查，避免owner参与众筹导致的锁仓问题
+        _transfer(msg.sender, otherAccount, OTHER_AMOUNT);
         otherTokensTransferred = true;
         
         emit OtherTokensTransferred(otherAccount, OTHER_AMOUNT);

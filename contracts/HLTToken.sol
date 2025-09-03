@@ -119,7 +119,7 @@ contract HLTToken is ERC20, Ownable {
      * @dev 重写transfer函数，添加锁仓检查
      */
     function transfer(address to, uint256 amount) public virtual override returns (bool) {
-        require(!isUserLocked(msg.sender), "Tokens are locked for 12 months");
+        // Lock disabled: pure ERC20 transfer
         return super.transfer(to, amount);
     }
     
@@ -127,7 +127,7 @@ contract HLTToken is ERC20, Ownable {
      * @dev 重写transferFrom函数，添加锁仓检查
      */
     function transferFrom(address from, address to, uint256 amount) public virtual override returns (bool) {
-        require(!isUserLocked(from), "Tokens are locked for 12 months");
+        // Lock disabled: pure ERC20 transferFrom
         return super.transferFrom(from, to, amount);
     }
     

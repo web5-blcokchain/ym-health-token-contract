@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./HLTToken.sol";
+import "./LockVault.sol";
 
 /**
  * @title HLT Crowdsale
@@ -20,6 +21,9 @@ contract Crowdsale is ReentrancyGuard, Ownable {
     
     // USDT代币合约
     IERC20 public usdtToken;
+
+    // 新增：锁仓金库（单金库）
+    LockVault public vault;
     
     // 众筹参数
     // tokensPerUSDT 表示 HLT 代币的价格：1 USDT = 12 HLT
@@ -43,11 +47,11 @@ contract Crowdsale is ReentrancyGuard, Ownable {
     mapping(address => uint256) public userPurchases; // 用户购买的USDT数量
     mapping(address => uint256) public userHLTAmount; // 用户获得的HLT数量
     mapping(address => bool) public hasParticipated; // 用户是否参与过
-    mapping(address => uint256) public userLockTime; // 用户锁仓开始时间
+    // mapping(address => uint256) public userLockTime; // 已移除
     
     // 事件
     event CrowdsaleStarted(uint256 startTime);
-    event TokensPurchased(address indexed buyer, uint256 usdtAmount, uint256 hltAmount, uint256 lockTime, uint256 timestamp);
+    event TokensPurchased(address indexed buyer, uint256 usdtAmount, uint256 hltAmount, uint256 scheduleId, uint256 timestamp);
     event CrowdsaleEnded(uint256 endTime, uint256 totalUSDT, uint256 totalHLT);
     event USDTWithdrawn(address indexed owner, uint256 amount);
     event PriceUpdated(uint256 oldPrice, uint256 newPrice);
@@ -72,6 +76,14 @@ contract Crowdsale is ReentrancyGuard, Ownable {
         usdtToken = IERC20(_usdtToken);
     }
     
+    /**
+     * @dev 设置锁仓金库地址
+     */
+    function setVault(address _vault) external onlyOwner {
+        require(_vault != address(0), "Invalid vault");
+        vault = LockVault(_vault);
+    }
+
     /**
      * @dev 设置代币价格
      * @param _newPrice 新的价格比例 (1 USDT = _newPrice HLT)
@@ -113,7 +125,7 @@ contract Crowdsale is ReentrancyGuard, Ownable {
         // 调整计算顺序避免精度损失：先乘以1e12，再乘以tokensPerUSDT
         uint256 hltAmount = _usdtAmount * 1e12 * tokensPerUSDT;
         
-        // 检查代币余额
+        // 检查代币余额（Crowdsale 合约自身余额）
         require(token.balanceOf(address(this)) >= hltAmount, "Insufficient token balance");
         
         // 检查USDT授权
@@ -126,7 +138,7 @@ contract Crowdsale is ReentrancyGuard, Ownable {
         totalUSDTRaised += _usdtAmount;
         totalHLTSold += hltAmount;
         
-        // 更新用户记录
+        // 更新用户记录（HLT数量统计为锁仓入账总额）
         userPurchases[msg.sender] += _usdtAmount;
         userHLTAmount[msg.sender] += hltAmount;
         
@@ -135,17 +147,14 @@ contract Crowdsale is ReentrancyGuard, Ownable {
             totalParticipants++;
         }
         
-        // 设置锁仓时间（只在首次购买时设置）
-        if (userLockTime[msg.sender] == 0) {
-            userLockTime[msg.sender] = block.timestamp;
-            // 在HLTToken合约中设置用户锁仓时间
-            token.setUserLockTime(msg.sender, block.timestamp);
-        }
+        // 将 HLT 转入 LockVault，并创建该笔购买的锁仓记录（独立计时）
+        require(address(vault) != address(0), "Vault not set");
+        IERC20(address(token)).safeTransfer(address(vault), hltAmount);
+        uint64 start = uint64(block.timestamp);
+        uint64 unlock = uint64(start + uint64(LOCK_DURATION));
+        uint256 scheduleId = vault.createSchedule(msg.sender, hltAmount, start, unlock);
         
-        // 给用户代币（锁仓状态）
-        IERC20(address(token)).safeTransfer(msg.sender, hltAmount);
-        
-        emit TokensPurchased(msg.sender, _usdtAmount, hltAmount, userLockTime[msg.sender], block.timestamp);
+        emit TokensPurchased(msg.sender, _usdtAmount, hltAmount, scheduleId, block.timestamp);
     }
     
     /**
@@ -209,20 +218,13 @@ contract Crowdsale is ReentrancyGuard, Ownable {
      * @dev 查询用户锁仓信息
      * @param _user 用户地址
      */
-    function getUserLockInfo(address _user) external view returns (
-        uint256 lockTime,
-        uint256 unlockTime,
-        bool isLocked
-    ) {
-        uint256 userUnlockTime = userLockTime[_user] + LOCK_DURATION;
-        bool userIsLocked = block.timestamp < userUnlockTime;
-        
-        return (
-            userLockTime[_user],
-            userUnlockTime,
-            userIsLocked
-        );
-    }
+    // getUserLockInfo 移除，锁仓信息请从 LockVault 查询
+    
+    /**
+     * @dev 查询锁仓信息
+     */
+    // 锁仓信息查询请使用 LockVault（schedulesOf、getLockedBalance、getClaimable、getRemainingLockTime）
+    // 锁仓信息查询请使用 LockVault（schedulesOf、getLockedBalance、getClaimable、getRemainingLockTime）
     
     /**
      * @dev 查询众筹状态
@@ -298,17 +300,6 @@ contract Crowdsale is ReentrancyGuard, Ownable {
     /**
      * @dev 查询锁仓信息
      */
-    function getLockInfo(address _user) external view returns (
-        uint256 lockTime,
-        uint256 unlockTime,
-        bool isLocked,
-        uint256 remainingLockTime
-    ) {
-        lockTime = userLockTime[_user];
-        unlockTime = lockTime + LOCK_DURATION;
-        isLocked = block.timestamp < unlockTime;
-        remainingLockTime = isLocked ? unlockTime - block.timestamp : 0;
-        
-        return (lockTime, unlockTime, isLocked, remainingLockTime);
-    }
+    // 锁仓信息查询请使用 LockVault（schedulesOf、getLockedBalance、getClaimable、getRemainingLockTime）
+    // 锁仓信息查询请使用 LockVault（schedulesOf、getLockedBalance、getClaimable、getRemainingLockTime）
 }

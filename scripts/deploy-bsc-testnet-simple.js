@@ -47,15 +47,36 @@ async function main() {
         const crowdsaleAddress = crowdsale.address;
         console.log("✅ Crowdsale 部署成功，地址:", crowdsaleAddress);
 
+        // 新增：部署 LockVault 并与 Crowdsale 互相绑定
+        console.log("\n=== 部署 LockVault 合约 ===");
+        const LockVault = await ethers.getContractFactory("LockVault");
+        console.log("正在部署 LockVault...");
+        const vault = await LockVault.deploy(hltTokenAddress, deployer.address);
+        console.log("等待交易确认...");
+        await vault.deployed();
+        const vaultAddress = vault.address;
+        console.log("✅ LockVault 部署成功，地址:", vaultAddress);
+
+        console.log("\n=== 绑定 Crowdsale ↔ LockVault ===");
+        console.log("设置 Crowdsale.setVault(vault)...");
+        const setVaultTx = await crowdsale.setVault(vaultAddress);
+        await setVaultTx.wait();
+        console.log("✅ 已在 Crowdsale 设置 Vault 地址");
+
+        console.log("设置 LockVault.setCrowdsale(crowdsale)...");
+        const setCrowdsaleOnVaultTx = await vault.setCrowdsale(crowdsaleAddress);
+        await setCrowdsaleOnVaultTx.wait();
+        console.log("✅ 已在 LockVault 设置 Crowdsale 地址");
+
         console.log("\n=== 配置合约权限 ===");
 
-        // 设置众筹合约地址
+        // 设置众筹合约地址（HLTToken -> Crowdsale）
         console.log("设置众筹合约地址...");
         const setCrowdsaleTx = await hltToken.setCrowdsaleContract(crowdsaleAddress);
         await setCrowdsaleTx.wait();
         console.log("✅ 已设置众筹合约地址");
 
-        // 给众筹合约分配代币
+        // 给众筹合约分配代币（售卖额度）
         console.log("给众筹合约分配代币...");
         const saleAmount = await hltToken.SALE_AMOUNT();
         const transferTx = await hltToken.transfer(crowdsaleAddress, saleAmount);
@@ -72,21 +93,24 @@ async function main() {
         console.log("📋 合约地址:");
         console.log("   HLTToken:", hltTokenAddress);
         console.log("   Crowdsale:", crowdsaleAddress);
+        console.log("   LockVault:", vaultAddress);
         console.log("   MockUSDT:", usdtAddress);
         console.log("   其他账号:", otherAccountAddress);
 
         console.log("\n🔗 BSC测试网浏览器链接:");
         console.log("   HLTToken: https://testnet.bscscan.com/address/" + hltTokenAddress);
         console.log("   Crowdsale: https://testnet.bscscan.com/address/" + crowdsaleAddress);
+        console.log("   LockVault: https://testnet.bscscan.com/address/" + vaultAddress);
 
         console.log("\n📝 验证命令:");
         console.log(`npx hardhat verify --network bscTestnet ${hltTokenAddress} "${tokenName}" "${tokenSymbol}" ${deployer.address} ${otherAccountAddress}`);
         console.log(`npx hardhat verify --network bscTestnet ${crowdsaleAddress} ${hltTokenAddress} ${usdtAddress} ${deployer.address}`);
+        console.log(`npx hardhat verify --network bscTestnet ${vaultAddress} ${hltTokenAddress} ${deployer.address}`);
 
         console.log("\n🚀 下一步操作:");
         console.log("1. 验证合约");
         console.log("2. 调用 crowdsale.startCrowdsale() 开始众筹");
-        console.log("3. 运行集成测试");
+        console.log("3. 前端通过 crowdsale.vault() 读取 Vault 地址，进行锁仓查询与领取");
 
     } catch (error) {
         console.error("❌ 部署失败:", error.message);

@@ -11,7 +11,9 @@ async function main() {
     // BSC测试网配置
     const tokenName = "HealthLife Token";
     const tokenSymbol = "HLT";
-    const usdtAddress = "0xeb4C53574edBF035FfBAF647b3E957b4FB88CD6B"; // MockUSDT deployed on BSC Testnet
+    // 允许通过环境变量覆盖 USDT 地址
+    const usdtAddress = process.env.USDT_ADDRESS || "0xeb4C53574edBF035FfBAF647b3E957b4FB88CD6B"; // MockUSDT deployed on BSC Testnet
+    console.log("使用的 USDT 地址:", usdtAddress, process.env.USDT_ADDRESS ? "(来自环境变量 USDT_ADDRESS)" : "(使用脚本内置 MockUSDT 地址)");
     // 使用一个不同的地址作为其他账号（接收7600万代币）
     const otherAccountAddress = process.env.OTHER_ACCOUNT_ADDRESS || "0x620bdC24abCf45F8Ea1D99fEF2EC5Aae7CD300A7";
 
@@ -94,13 +96,14 @@ async function main() {
         console.log("   HLTToken:", hltTokenAddress);
         console.log("   Crowdsale:", crowdsaleAddress);
         console.log("   LockVault:", vaultAddress);
-        console.log("   MockUSDT:", usdtAddress);
+        console.log("   USDT:", usdtAddress);
         console.log("   其他账号:", otherAccountAddress);
 
         console.log("\n🔗 BSC测试网浏览器链接:");
         console.log("   HLTToken: https://testnet.bscscan.com/address/" + hltTokenAddress);
         console.log("   Crowdsale: https://testnet.bscscan.com/address/" + crowdsaleAddress);
         console.log("   LockVault: https://testnet.bscscan.com/address/" + vaultAddress);
+        console.log("   USDT: https://testnet.bscscan.com/address/" + usdtAddress);
 
         console.log("\n📝 验证命令:");
         console.log(`npx hardhat verify --network bscTestnet ${hltTokenAddress} "${tokenName}" "${tokenSymbol}" ${deployer.address} ${otherAccountAddress}`);

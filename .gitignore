@@ -23,6 +23,8 @@ coverage.json
 
 # Gas reports
 gas-report.txt
+dev-docs/
+dev-docs1/
 
 # IDE
 .vscode/

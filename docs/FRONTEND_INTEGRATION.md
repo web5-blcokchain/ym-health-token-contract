@@ -103,13 +103,15 @@ const networks = {
 // 合约地址配置（请替换为实际部署地址）
 const contractAddresses = {
   bscTestnet: {
-    HLTToken: '0x...', // HLT代币合约地址
-    Crowdsale: '0x...', // 众筹合约地址
-    USDT: '0x...' // USDT合约地址
+    HLTToken: '0xe80D3Cd913b4Ff5c010cD1d014c83f4Aa5Fe3Ee0', // HLT代币合约地址
+    Crowdsale: '0x0eD62a3c7a5c9C350B7BBfc481C7619b54024533', // 众筹合约地址
+    LockVault: '0x67Ff1823C1a0fbe9ee38935AeF15100564061646', // 锁仓金库
+    USDT: '0xeb4C53574edBF035FfBAF647b3E957b4FB88CD6B' // BSC测试网USDT(你提供的已有地址)
   },
   bscMainnet: {
     HLTToken: '0x...',
     Crowdsale: '0x...',
+    LockVault: '0x...',
     USDT: '0x55d398326f99059fF775485246999027B3197955' // BSC主网USDT
   }
 };
@@ -173,33 +175,27 @@ const lockTime = await hltToken.userLockTime(userAddress);
 #### 众筹状态查询
 
 ```javascript
-// 查询众筹状态
-const crowdsaleStatus = await crowdsale.getCrowdsaleStatus();
-const {
-  active,      // 是否活跃
-  ended,       // 是否结束
-  startTime,   // 开始时间
-  endTime      // 结束时间
-} = crowdsaleStatus;
+// 查询众筹状态（返回7个字段）
+const [active, ended, startTime, endTime, totalUSDTRaised, totalHLTSold, totalParticipants] = await crowdsale.getCrowdsaleStatus();
 
 // 查询代币价格
 const tokensPerUSDT = await crowdsale.getTokenPrice(); // 默认12
 
 // 查询购买限制
-const minPurchase = await crowdsale.MIN_PURCHASE_USDT(); // 1 USDT
-const maxPurchase = await crowdsale.MAX_PURCHASE_USDT(); // 100万 USDT
+const minPurchase = await crowdsale.MIN_PURCHASE_USDT(); // 1 USDT（6位小数）
+const maxPurchase = await crowdsale.MAX_PURCHASE_USDT(); // 100万 USDT（6位小数）
 ```
 
 #### 众筹统计
 
 ```javascript
-// 查询众筹统计数据
-const stats = await crowdsale.getCrowdsaleStats();
-const {
-  totalUSDTRaised,    // 总筹集USDT
-  totalHLTSold,       // 总售出HLT
-  totalParticipants   // 总参与人数
-} = stats;
+// 使用 getCrowdsaleStatus 返回的聚合数据
+const [_, __, ___, ____, totalUSDTRaised, totalHLTSold, totalParticipants] = await crowdsale.getCrowdsaleStatus();
+
+// 或者单独读取公开变量（两种方式等价）
+// const totalUSDTRaised = await crowdsale.totalUSDTRaised();
+// const totalHLTSold = await crowdsale.totalHLTSold();
+// const totalParticipants = await crowdsale.totalParticipants();
 ```
 
 #### 用户信息查询
@@ -242,6 +238,36 @@ const usdtBalance = await usdtToken.balanceOf(userAddress);
 // 授权USDT给众筹合约
 const approveUSDT = await usdtToken.approve(crowdsaleAddress, amount);
 ```
+
+### LockVault 合约接口（锁仓领取）
+
+```javascript
+// LockVault 简化 ABI
+const LOCKVAULT_ABI = [
+  "function schedulesOf(address user) view returns (tuple(uint128 total, uint128 released, uint64 start, uint64 unlock)[])",
+  "function getLockedBalance(address user) view returns (uint256)",
+  "function getClaimable(address user) view returns (uint256)",
+  "function getRemainingLockTime(address user) view returns (uint256)",
+  "function claimAll()",
+  "function claim(uint256[] scheduleIds)"
+];
+
+// 实例化
+const lockVault = new ethers.Contract(contractAddresses.bscTestnet.LockVault, LOCKVAULT_ABI, providerOrSigner);
+
+// 查询锁仓进度
+const schedules = await lockVault.schedulesOf(userAddress);
+const locked = await lockVault.getLockedBalance(userAddress);
+const claimable = await lockVault.getClaimable(userAddress);
+const remaining = await lockVault.getRemainingLockTime(userAddress);
+
+// 领取（到期后）
+await lockVault.connect(signer).claimAll();
+// 或者按指定期次领取
+await lockVault.connect(signer).claim([0,1]);
+```
+
+说明：购买获得的 HLT 不再直接进入用户地址，而是先进入 LockVault 为“每笔购买”创建独立的锁仓计划（schedule）。12个月后可领取。HLTToken 中的 isUserLocked/getUserUnlockTime 针对“非众筹售卖额度”的转移限制，不用于众筹锁仓领取。
 
 ## 💻 前端集成示例
 
@@ -288,10 +314,11 @@ class HLTIntegration {
     this.provider = provider;
     this.addresses = contractAddresses;
     
-    // 初始化合约实例
+    // 初始化合约实例（新增 LockVault）
     this.hltToken = new ethers.Contract(contractAddresses.HLTToken, HLT_ABI, provider);
     this.crowdsale = new ethers.Contract(contractAddresses.Crowdsale, CROWDSALE_ABI, provider);
     this.usdtToken = new ethers.Contract(contractAddresses.USDT, USDT_ABI, provider);
+    this.lockVault = new ethers.Contract(contractAddresses.LockVault, LOCKVAULT_ABI, provider);
   }
 
   // 连接钱包
@@ -337,24 +364,24 @@ class HLTIntegration {
     };
   }
 
-  // 获取众筹信息
+  // 获取众筹信息（修正：不再调用不存在的 getCrowdsaleStats）
   async getCrowdsaleInfo() {
-    const [status, price, stats] = await Promise.all([
+    const [status, price] = await Promise.all([
       this.crowdsale.getCrowdsaleStatus(),
-      this.crowdsale.getTokenPrice(),
-      this.crowdsale.getCrowdsaleStats()
+      this.crowdsale.getTokenPrice()
     ]);
 
+    const [active, ended, startTime, endTime, totalUSDTRaised, totalHLTSold, totalParticipants] = status;
+
     return {
-      active: status.active,
-      ended: status.ended,
-      startTime: status.startTime.toNumber(),
-      endTime: status.endTime.toNumber(),
-      price: price.toNumber(),
+      active, ended,
+      startTime: startTime.toNumber?.() ?? Number(startTime),
+      endTime: endTime.toNumber?.() ?? Number(endTime),
+      price: price.toNumber?.() ?? Number(price),
       stats: {
-        totalUSDTRaised: ethers.utils.formatUnits(stats.totalUSDTRaised, 6),
-        totalHLTSold: ethers.utils.formatEther(stats.totalHLTSold),
-        totalParticipants: stats.totalParticipants.toNumber()
+        totalUSDTRaised: ethers.utils.formatUnits(totalUSDTRaised, 6),
+        totalHLTSold: ethers.utils.formatEther(totalHLTSold),
+        totalParticipants: totalParticipants.toNumber?.() ?? Number(totalParticipants)
       }
     };
   }
@@ -593,13 +620,13 @@ class RealTimeUpdater {
   listenToPurchaseEvents(callback) {
     const filter = this.contracts.crowdsale.filters.TokensPurchased();
     
-    this.contracts.crowdsale.on(filter, (buyer, usdtAmount, hltAmount, lockTime, timestamp, event) => {
+    this.contracts.crowdsale.on(filter, (buyer, usdtAmount, hltAmount, scheduleId, timestamp, event) => {
       callback({
         buyer,
         usdtAmount: ethers.utils.formatUnits(usdtAmount, 6),
         hltAmount: ethers.utils.formatEther(hltAmount),
-        lockTime: lockTime.toNumber(),
-        timestamp: timestamp.toNumber(),
+        scheduleId: scheduleId.toNumber?.() ?? Number(scheduleId),
+        timestamp: (timestamp.toNumber?.() ?? Number(timestamp)),
         transactionHash: event.transactionHash
       });
     });

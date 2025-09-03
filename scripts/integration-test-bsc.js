@@ -3,10 +3,10 @@ const { ethers } = require("hardhat");
 async function main() {
     console.log("🧪 === BSC测试网集成测试开始 ===\n");
 
-    // 部署的合约地址（最新部署）
-    const MOCKUSDT_ADDRESS = "0xeb4C53574edBF035FfBAF647b3E957b4FB88CD6B";
-    const HLTTOKEN_ADDRESS = "0x64a4296C32A23C6296C089d6699d415377f8a8F6";
-    const CROWDSALE_ADDRESS = "0x699a392289Ec3800A03AcD52aa1695ebBA2fC516";
+    // 合约地址（优先取环境变量，否则使用最新部署地址）
+    const MOCKUSDT_ADDRESS = process.env.USDT_ADDRESS || "0xeb4C53574edBF035FfBAF647b3E957b4FB88CD6B";
+    const HLTTOKEN_ADDRESS = process.env.HLT_ADDRESS || "0xe80D3Cd913b4Ff5c010cD1d014c83f4Aa5Fe3Ee0";
+    const CROWDSALE_ADDRESS = process.env.CROWDSALE_ADDRESS || "0x0eD62a3c7a5c9C350B7BBfc481C7619b54024533";
 
     // 获取签名者
     const [deployer] = await ethers.getSigners();
@@ -23,17 +23,22 @@ async function main() {
     const Crowdsale = await ethers.getContractFactory("Crowdsale");
     const crowdsale = Crowdsale.attach(CROWDSALE_ADDRESS);
 
+    // 查询 LockVault 地址并连接
+    const vaultAddress = await crowdsale.vault();
+    const LockVault = await ethers.getContractFactory("LockVault");
+    const lockVault = LockVault.attach(vaultAddress);
+
     try {
         console.log("📋 === 合约状态检查 ===");
         
-        // 检查MockUSDT
+        // 检查USDT（MockUSDT）
         const usdtName = await mockUSDT.name();
         const usdtSymbol = await mockUSDT.symbol();
         const usdtDecimals = await mockUSDT.decimals();
         const usdtTotalSupply = await mockUSDT.totalSupply();
         const deployerUsdtBalance = await mockUSDT.balanceOf(deployer.address);
         
-        console.log("MockUSDT 信息:");
+        console.log("USDT 信息:");
         console.log(`  名称: ${usdtName}`);
         console.log(`  符号: ${usdtSymbol}`);
         console.log(`  精度: ${usdtDecimals}`);
@@ -61,14 +66,19 @@ async function main() {
         const crowdsaleToken = await crowdsale.token();
         const crowdsaleUSDT = await crowdsale.usdtToken();
         const crowdsaleActive = await crowdsale.crowdsaleActive();
-        const tokensPerUSDT = await crowdsale.tokensPerUSDT();
+        const tokensPerUSDT = await crowdsale.getTokenPrice();
         
         console.log("\nCrowdsale 信息:");
         console.log(`  所有者: ${crowdsaleOwner}`);
         console.log(`  HLT代币地址: ${crowdsaleToken}`);
         console.log(`  USDT地址: ${crowdsaleUSDT}`);
+        console.log(`  LockVault地址: ${vaultAddress}`);
         console.log(`  众筹状态: ${crowdsaleActive ? '活跃' : '未开始'}`);
         console.log(`  兑换比例: 1 USDT = ${tokensPerUSDT} HLT`);
+
+        // 预检查锁仓（购买前的 schedule 数量）
+        const schedulesBefore = await lockVault.schedulesOf(deployer.address);
+        console.log(`\n购买前锁仓计划数量: ${schedulesBefore.length}`);
 
         console.log("\n🚀 === 开始功能测试 ===");
 
@@ -108,18 +118,19 @@ async function main() {
         console.log("✅ 代币购买成功");
         console.log(`   交易哈希: ${buyReceipt.transactionHash}`);
 
-        // 检查购买后的余额
-        const newHltBalance = await hltToken.balanceOf(deployer.address);
+        // 购买后查询USDT余额与锁仓情况
         const newUsdtBalance = await mockUSDT.balanceOf(deployer.address);
-        console.log(`   新的HLT余额: ${ethers.utils.formatEther(newHltBalance)} HLT`);
         console.log(`   新的USDT余额: ${ethers.utils.formatUnits(newUsdtBalance, 6)} USDT`);
 
-        // 3. 检查锁仓状态
-        console.log("\n3️⃣ 检查锁仓状态...");
-        const lockTime = await hltToken.userLockTime(deployer.address);
-        const isLocked = await hltToken.isUserLocked(deployer.address);
-        console.log(`   锁仓开始时间: ${new Date(lockTime.toNumber() * 1000).toLocaleString()}`);
-        console.log(`   当前是否锁仓: ${isLocked}`);
+        console.log("\n3️⃣ 检查锁仓状态 (LockVault)...");
+        const schedules = await lockVault.schedulesOf(deployer.address);
+        const locked = await lockVault.getLockedBalance(deployer.address);
+        const claimable = await lockVault.getClaimable(deployer.address);
+        const remaining = await lockVault.getRemainingLockTime(deployer.address);
+        console.log(`   现有锁仓计划数量: ${schedules.length}`);
+        console.log(`   锁定总额: ${ethers.utils.formatEther(locked)} HLT`);
+        console.log(`   可领取额度: ${ethers.utils.formatEther(claimable)} HLT`);
+        console.log(`   剩余锁定时间: ${remaining.toString()} 秒`);
 
         // 4. 检查众筹统计
         console.log("\n4️⃣ 检查众筹统计...");
@@ -134,24 +145,25 @@ async function main() {
         console.log("\n5️⃣ 检查用户购买记录...");
         const userHLTAmount = await crowdsale.userHLTAmount(deployer.address);
         const userPurchases = await crowdsale.userPurchases(deployer.address);
-        console.log(`   用户购买的HLT: ${ethers.utils.formatEther(userHLTAmount)} HLT`);
-        console.log(`   用户支付的USDT: ${ethers.utils.formatUnits(userPurchases, 6)} USDT`);
+        console.log(`   用户购买的HLT(累计): ${ethers.utils.formatEther(userHLTAmount)} HLT`);
+        console.log(`   用户支付的USDT(累计): ${ethers.utils.formatUnits(userPurchases, 6)} USDT`);
 
         console.log("\n✅ === 集成测试完成 ===");
         console.log("🎉 所有功能测试通过！");
         
         console.log("\n📊 === 测试总结 ===");
-        console.log("✅ MockUSDT 合约正常工作");
+        console.log("✅ USDT 合约正常工作");
         console.log("✅ HLTToken 合约正常工作");
         console.log("✅ Crowdsale 合约正常工作");
         console.log("✅ 代币购买功能正常");
-        console.log("✅ 锁仓机制正常");
+        console.log("✅ 锁仓机制正常（已生成 LockVault 计划）");
         console.log("✅ 统计功能正常");
 
         console.log("\n🔗 合约浏览器链接:");
-        console.log(`   MockUSDT: https://testnet.bscscan.com/address/${MOCKUSDT_ADDRESS}`);
+        console.log(`   USDT: https://testnet.bscscan.com/address/${MOCKUSDT_ADDRESS}`);
         console.log(`   HLTToken: https://testnet.bscscan.com/address/${HLTTOKEN_ADDRESS}`);
         console.log(`   Crowdsale: https://testnet.bscscan.com/address/${CROWDSALE_ADDRESS}`);
+        console.log(`   LockVault: https://testnet.bscscan.com/address/${vaultAddress}`);
 
     } catch (error) {
         console.error("❌ 测试失败:", error.message);

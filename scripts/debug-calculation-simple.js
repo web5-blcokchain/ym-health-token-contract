@@ -16,7 +16,8 @@ async function main() {
     await mockUSDT.deployed();
     
     const Crowdsale = await ethers.getContractFactory('Crowdsale');
-    const crowdsale = await Crowdsale.deploy(hltToken.address, mockUSDT.address, deployer.address);
+    const lockDuration = 3600; // 1小时，便于本地/调试
+    const crowdsale = await Crowdsale.deploy(hltToken.address, mockUSDT.address, deployer.address, lockDuration);
     await crowdsale.deployed();
     
     // 测试计算

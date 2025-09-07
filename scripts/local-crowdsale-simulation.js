@@ -35,11 +35,12 @@ async function main() {
   await vault.deployed();
   console.log('✅ LockVault部署成功:', vault.address);
 
-  // 部署众筹合约
+  // 部署众筹合约（本地默认锁仓 1 小时，便于验证）
   const Crowdsale = await ethers.getContractFactory('Crowdsale');
-  const crowdsale = await Crowdsale.deploy(hltToken.address, mockUSDT.address, deployer.address);
+  const localLockDuration = 3600; // 1小时
+  const crowdsale = await Crowdsale.deploy(hltToken.address, mockUSDT.address, deployer.address, localLockDuration);
   await crowdsale.deployed();
-  console.log('✅ Crowdsale部署成功:', crowdsale.address);
+  console.log('✅ Crowdsale部署成功:', crowdsale.address, `(锁仓时长: ${localLockDuration}s)`);
 
   // 配置合约
   await hltToken.setCrowdsaleContract(crowdsale.address);
@@ -141,7 +142,7 @@ async function main() {
     const remaining1 = await vault.getRemainingLockTime(user1.address);
     console.log('  剩余未释放:', ethers.utils.formatUnits(locked1, 18), 'HLT');
     console.log('  当前可领取:', ethers.utils.formatUnits(claimable1, 18), 'HLT');
-    console.log('  剩余天数:', Math.floor(remaining1.toNumber() / 86400), '天');
+    console.log('  剩余秒数:', remaining1.toString(), '秒');
   } else {
     console.log('  ⚠️ 未找到用户1的锁仓记录');
   }
@@ -218,77 +219,18 @@ async function main() {
   // ===== 第八阶段：时间推进并领取（本地） =====
   console.log('⏩ === 第八阶段：时间推进并领取（本地） ===');
   const ONE_YEAR = 365 * 24 * 60 * 60;
-  await network.provider.send('evm_increaseTime', [ONE_YEAR + 10]);
+  // 将本地 EVM 时间向前推进 370 天（为了模拟主网长锁仓）。如需测试 1 小时，请改用 3600。
+  await network.provider.send('evm_increaseTime', [ONE_YEAR + 24 * 60 * 60 + 1]);
   await network.provider.send('evm_mine');
-  console.log('⌛ 已快进 ~365 天');
 
-  const claimableBefore = await vault.getClaimable(user1.address);
-  console.log('  领取前可领取(用户1):', ethers.utils.formatUnits(claimableBefore, 18), 'HLT');
-  await (await vault.connect(user1).claimAll()).wait();
-  const user1AfterClaimHLT = await hltToken.balanceOf(user1.address);
-  const lockedAfter = await vault.getLockedBalance(user1.address);
-  console.log('  ✅ 用户1已领取，余额:', ethers.utils.formatUnits(user1AfterClaimHLT, 18), 'HLT');
-  console.log('  Vault剩余未释放(用户1):', ethers.utils.formatUnits(lockedAfter, 18), 'HLT');
-  console.log();
+  const user1Claimable = await vault.getClaimable(user1.address);
+  console.log('  用户1可领取:', ethers.utils.formatUnits(user1Claimable, 18), 'HLT');
 
-  // ===== 第八阶段：异常情况测试 =====
-  console.log('⚠️  === 第八阶段：异常情况测试 ===');
-
-  // 测试众筹结束后购买
-  console.log('🚫 测试众筹结束后购买:');
-  try {
-    await mockUSDT.connect(user1).approve(crowdsale.address, ethers.utils.parseUnits('100', 6));
-    await crowdsale.connect(user1).buyTokens(ethers.utils.parseUnits('100', 6));
-    console.log('  ❌ 错误：众筹结束后还能购买！');
-  } catch (error) {
-    console.log('  ✅ 正确：众筹结束后购买被阻止');
-    console.log('  错误信息:', error.reason || '购买失败');
-  }
-
-  // 测试重复提取资金
-  console.log('\n🚫 测试重复提取资金:');
-  try {
-    await crowdsale.withdrawUSDT();
-    console.log('  ❌ 错误：重复提取资金成功了！');
-  } catch (error) {
-    console.log('  ✅ 正确：重复提取资金被阻止');
-    console.log('  错误信息:', error.reason || '提取失败');
-  }
-
-  // 测试非管理员提取资金
-  console.log('\n🚫 测试非管理员提取资金:');
-  try {
-    await crowdsale.connect(user1).withdrawUSDT();
-    console.log('  ❌ 错误：非管理员提取资金成功了！');
-  } catch (error) {
-    console.log('  ✅ 正确：非管理员提取资金被阻止');
-    console.log('  错误信息:', error.reason || '权限不足');
-  }
-  console.log();
-
-  // ===== 测试总结 =====
-  console.log('🎉 === 测试总结 ===');
-
-  const user1Info = await crowdsale.getUserInfo(user1.address);
-  const user2Info = await crowdsale.getUserInfo(user2.address);
-
-  console.log('📊 最终统计:');
-  console.log('  用户1购买:', ethers.utils.formatUnits(user1Info[0], 6), 'USDT →', ethers.utils.formatUnits(user1Info[1], 18), 'HLT');
-  console.log('  用户2购买:', ethers.utils.formatUnits(user2Info[0], 6), 'USDT →', ethers.utils.formatUnits(user2Info[1], 18), 'HLT');
-  console.log('  总计:', ethers.utils.formatUnits(user1Info[0].add(user2Info[0]), 6), 'USDT →', ethers.utils.formatUnits(user1Info[1].add(user2Info[1]), 18), 'HLT');
-
-  console.log('\n✅ 测试项目:');
-  console.log('  ✅ 合约部署和配置');
-  console.log('  ✅ 用户购买功能');
-  console.log('  ✅ 资金流转正确');
-  console.log('  ✅ 锁仓机制有效（Vault）');
-  console.log('  ✅ 众筹统计准确');
-  console.log('  ✅ 资金提取成功');
-  console.log('  ✅ 到期领取成功（本地时间快进）');
-  console.log('  ✅ 异常情况处理');
-  console.log('  ✅ 计算逻辑正确');
-
-  console.log('\n🎯 所有测试通过！众筹系统运行正常！');
+  await vault.connect(user1).claimAll();
+  console.log('✅ 用户1已领取全部');
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

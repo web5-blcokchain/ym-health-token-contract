@@ -17,6 +17,18 @@ async function main() {
     // 使用一个不同的地址作为其他账号（接收7600万代币）
     const otherAccountAddress = process.env.OTHER_ACCOUNT_ADDRESS || "0x620bdC24abCf45F8Ea1D99fEF2EC5Aae7CD300A7";
 
+    // 新增：锁仓时长（秒），默认 3600（1小时），可通过 CROWDSALE_LOCK_DURATION 覆盖
+    let lockDuration = 3600;
+    if (process.env.CROWDSALE_LOCK_DURATION) {
+        const parsed = parseInt(process.env.CROWDSALE_LOCK_DURATION, 10);
+        if (!Number.isNaN(parsed) && parsed > 0) {
+            lockDuration = parsed;
+        } else {
+            console.warn(`⚠️ 无效的 CROWDSALE_LOCK_DURATION: ${process.env.CROWDSALE_LOCK_DURATION}，将使用默认值 3600`);
+        }
+    }
+    console.log(`锁仓时长: ${lockDuration} 秒${lockDuration === 3600 ? " (默认1小时，测试快速回归)" : ""}`);
+
     try {
         console.log("=== 部署 HLTToken 合约 ===");
         const HLTToken = await ethers.getContractFactory("HLTToken");
@@ -41,7 +53,8 @@ async function main() {
         const crowdsale = await Crowdsale.deploy(
             hltTokenAddress,
             usdtAddress,
-            deployer.address
+            deployer.address,
+            lockDuration
         );
         
         console.log("等待交易确认...");
@@ -98,6 +111,7 @@ async function main() {
         console.log("   LockVault:", vaultAddress);
         console.log("   USDT:", usdtAddress);
         console.log("   其他账号:", otherAccountAddress);
+        console.log(`   锁仓时长(秒): ${lockDuration}`);
 
         console.log("\n🔗 BSC测试网浏览器链接:");
         console.log("   HLTToken: https://testnet.bscscan.com/address/" + hltTokenAddress);
@@ -107,8 +121,11 @@ async function main() {
 
         console.log("\n📝 验证命令:");
         console.log(`npx hardhat verify --network bscTestnet ${hltTokenAddress} "${tokenName}" "${tokenSymbol}" ${deployer.address} ${otherAccountAddress}`);
-        console.log(`npx hardhat verify --network bscTestnet ${crowdsaleAddress} ${hltTokenAddress} ${usdtAddress} ${deployer.address}`);
+        console.log(`npx hardhat verify --network bscTestnet ${crowdsaleAddress} ${hltTokenAddress} ${usdtAddress} ${deployer.address} ${lockDuration}`);
         console.log(`npx hardhat verify --network bscTestnet ${vaultAddress} ${hltTokenAddress} ${deployer.address}`);
+
+        console.log("\nℹ️ 使用 1 小时锁仓部署示例:");
+        console.log("   USDT_ADDRESS=0x<测试网USDT地址> CROWDSALE_LOCK_DURATION=3600 npx hardhat run scripts/deploy-bsc-testnet-simple.js --network bscTestnet");
 
         console.log("\n🚀 下一步操作:");
         console.log("1. 验证合约");

@@ -11,7 +11,7 @@ import "./LockVault.sol";
 /**
  * @title HLT Crowdsale
  * @dev 健康医疗代币众筹合约
- * @notice 支持USDT购买，价格可设置，购买后12个月锁仓
+ * @notice 支持USDT购买，价格可设置，购买后锁仓（测试网可参数化时长）
  */
 contract Crowdsale is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
@@ -30,7 +30,8 @@ contract Crowdsale is ReentrancyGuard, Ownable {
     uint256 public tokensPerUSDT = 12; // 1 USDT = 12 HLT (价格比例)
     uint256 public constant MIN_PURCHASE_USDT = 1000000; // 最小购买1 USDT (考虑6位小数)
     uint256 public constant MAX_PURCHASE_USDT = 1000000000000; // 最大购买100万USDT (考虑6位小数)
-    uint256 public constant LOCK_DURATION = 365 days; // 12个月锁仓期
+    // uint256 public constant LOCK_DURATION = 365 days; // 12个月锁仓期
+    uint256 public immutable LOCK_DURATION; // 锁仓期（通过构造函数参数化，测试网可设为1小时）
     
     // 众筹状态
     bool public crowdsaleActive;
@@ -62,18 +63,22 @@ contract Crowdsale is ReentrancyGuard, Ownable {
      * @param _token HLT代币合约地址
      * @param _usdtToken USDT代币合约地址
      * @param _owner 合约所有者
+     * @param _lockDuration 锁仓时长（秒）。测试网可传入3600（1小时），主网上传入365天。
      */
     constructor(
         address _token,
         address _usdtToken,
-        address _owner
+        address _owner,
+        uint256 _lockDuration
     ) Ownable(_owner) {
         require(_token != address(0), "Invalid token address");
         require(_usdtToken != address(0), "Invalid USDT address");
         require(_owner != address(0), "Invalid owner address");
+        require(_lockDuration > 0, "Invalid lock duration");
         
         token = HLTToken(_token);
         usdtToken = IERC20(_usdtToken);
+        LOCK_DURATION = _lockDuration;
     }
     
     /**

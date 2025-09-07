@@ -34,10 +34,12 @@ describe("Crowdsale - calculation & precision", function () {
 
     // Deploy Crowdsale
     const Crowdsale = await ethers.getContractFactory("Crowdsale");
+    const lockDuration = 3600; // 1小时，测试更快
     const crowdsale = await Crowdsale.deploy(
       token.address ?? (await token.getAddress()),
       usdt.address ?? (await usdt.getAddress()),
-      owner.address
+      owner.address,
+      lockDuration
     );
     await (crowdsale.deployed?.() ?? Promise.resolve());
     await (crowdsale.waitForDeployment?.() ?? Promise.resolve());

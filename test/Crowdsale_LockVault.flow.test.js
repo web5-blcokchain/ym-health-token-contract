@@ -27,7 +27,8 @@ describe("Crowdsale + LockVault - E2E", function () {
 
     // Deploy Crowdsale
     const Crowdsale = await ethers.getContractFactory("Crowdsale");
-    const crowdsale = await Crowdsale.deploy(token.address ?? (await token.getAddress()), usdt.address ?? (await usdt.getAddress()), owner.address);
+    const lockDuration = 3600; // 1小时，更快完成端到端验证
+    const crowdsale = await Crowdsale.deploy(token.address ?? (await token.getAddress()), usdt.address ?? (await usdt.getAddress()), owner.address, lockDuration);
     await crowdsale.deployed?.();
     await crowdsale.waitForDeployment?.();
 

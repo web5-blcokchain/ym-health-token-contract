@@ -38,7 +38,8 @@ async function main() {
         
         const crowdsaleStatus = await crowdsale.getCrowdsaleStatus();
         console.log('众筹状态:', crowdsaleStatus[0] ? '进行中' : '未开始');
-        console.log('兑换比例:', await crowdsale.tokensPerUSDT(), 'HLT per USDT\n');
+        const price = await crowdsale.getTokenPrice();
+        console.log('兑换比例:', price.toString(), 'HLT per USDT\n');
         
         // ===== 第二阶段：模拟用户购买 =====
         console.log('🛒 === 第二阶段：模拟用户购买 ===');
@@ -100,14 +101,20 @@ async function main() {
         // ===== 第四阶段：检查锁仓机制 =====
         console.log('\n🔒 === 第四阶段：检查锁仓机制 ===');
         
-        const lockInfo = await crowdsale.getLockInfo(userAddress);
-        const lockTime = new Date(lockInfo[0].toNumber() * 1000);
-        const unlockTime = new Date(lockInfo[1].toNumber() * 1000);
+        const locks = await hltToken.getLocks(userAddress);
+        const lockedAmount = await hltToken.getLockedAmount(userAddress);
+        const unlockedAmount = await hltToken.getUnlockedAmount(userAddress);
         
-        console.log('锁仓开始时间:', lockTime.toLocaleString());
-        console.log('解锁时间:', unlockTime.toLocaleString());
-        console.log('当前是否锁仓:', lockInfo[2] ? '是' : '否');
-        console.log('剩余锁仓时间:', Math.floor(lockInfo[3].toNumber() / 86400), '天');
+        console.log('锁仓条目数:', locks.length);
+        if (locks.length > 0) {
+          const first = locks[0];
+          const lockTime = new Date(Number(first.start) * 1000);
+          const unlockTime = new Date(Number(first.unlock) * 1000);
+          console.log('首条锁仓开始时间:', lockTime.toLocaleString());
+          console.log('首条解锁时间:', unlockTime.toLocaleString());
+        }
+        console.log('锁定总额(HLT):', ethers.utils.formatEther(lockedAmount));
+        console.log('已解锁(HLT):', ethers.utils.formatEther(unlockedAmount));
         
         // 尝试转账HLT（应该失败，因为锁仓）
         console.log('\n🚫 测试锁仓期间转账（应该失败）...');
@@ -164,13 +171,13 @@ async function main() {
         // ===== 第七阶段：验证计算准确性 =====
         console.log('\n🧮 === 第七阶段：验证计算准确性 ===');
         
-        const expectedHLT = purchaseAmount.mul(await crowdsale.tokensPerUSDT()).mul(ethers.utils.parseUnits('1', 18)).div(ethers.utils.parseUnits('1', 6));
+        const expectedHLT = await crowdsale.calculateHLTAmount(purchaseAmount);
         const actualHLT = userInfo[1];
         
         console.log('购买金额:', ethers.utils.formatUnits(purchaseAmount, 6), 'USDT');
-        console.log('兑换比例:', await crowdsale.tokensPerUSDT(), 'HLT per USDT');
-        console.log('期望HLT:', ethers.utils.formatUnits(expectedHLT, 18), 'HLT');
-        console.log('实际HLT:', ethers.utils.formatUnits(actualHLT, 18), 'HLT');
+        console.log('兑换比例:', (await crowdsale.getTokenPrice()).toString(), 'HLT per USDT');
+        console.log('期望HLT:', ethers.utils.formatEther(expectedHLT), 'HLT');
+        console.log('实际HLT:', ethers.utils.formatEther(actualHLT), 'HLT');
         console.log('计算正确:', expectedHLT.eq(actualHLT) ? '✅ 是' : '❌ 否');
         
         // ===== 测试总结 =====

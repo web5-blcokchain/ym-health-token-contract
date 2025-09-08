@@ -2,7 +2,7 @@ const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
 /**
- * Crowdsale - calculation & precision tests
+ * Crowdsale - calculation & precision tests (no LockVault)
  * Focus on:
  * - decimals handling (USDT 6, HLT 18)
  * - calculateHLTAmount / calculateUSDTAmount consistency
@@ -26,12 +26,6 @@ describe("Crowdsale - calculation & precision", function () {
     await (token.deployed?.() ?? Promise.resolve());
     await (token.waitForDeployment?.() ?? Promise.resolve());
 
-    // Deploy LockVault
-    const LockVault = await ethers.getContractFactory("LockVault");
-    const vault = await LockVault.deploy(token.address ?? (await token.getAddress()), owner.address);
-    await (vault.deployed?.() ?? Promise.resolve());
-    await (vault.waitForDeployment?.() ?? Promise.resolve());
-
     // Deploy Crowdsale
     const Crowdsale = await ethers.getContractFactory("Crowdsale");
     const lockDuration = 3600; // 1小时，测试更快
@@ -44,18 +38,17 @@ describe("Crowdsale - calculation & precision", function () {
     await (crowdsale.deployed?.() ?? Promise.resolve());
     await (crowdsale.waitForDeployment?.() ?? Promise.resolve());
 
-    // Wire Crowdsale <-> Vault
-    await (await crowdsale.connect(owner).setVault(vault.address ?? (await vault.getAddress()))).wait();
-    await (await vault.connect(owner).setCrowdsale(crowdsale.address ?? (await crowdsale.getAddress()))).wait();
+    // Bind crowdsale on token
+    await (await token.connect(owner).setCrowdsaleContract(crowdsale.address ?? (await crowdsale.getAddress()))).wait();
 
     // Fund Crowdsale with sufficient HLT for tests
-    const saleFund = ethers.utils.parseUnits("20000000", 18); // 20,000,000 HLT to avoid insufficiency in tests
+    const saleFund = ethers.utils.parseUnits("20000000", 18); // 20,000,000 HLT
     await (await token.connect(owner).transfer(crowdsale.address ?? (await crowdsale.getAddress()), saleFund)).wait();
 
     // Start crowdsale
     await (await crowdsale.connect(owner).startCrowdsale()).wait();
 
-    return { owner, otherAccount, buyer, usdt, token, crowdsale, vault };
+    return { owner, otherAccount, buyer, usdt, token, crowdsale };
   }
 
   // simple generic revert checker (avoid waffle matchers)
@@ -77,7 +70,7 @@ describe("Crowdsale - calculation & precision", function () {
 
     const usdtDecimals = await usdt.decimals();
     const hltDecimals = await token.decimals();
-    const initialPrice = await crowdsale.tokensPerUSDT();
+    const initialPrice = await crowdsale.getTokenPrice();
 
     expect(usdtDecimals).to.equal(6);
     expect(hltDecimals).to.equal(18);
@@ -124,7 +117,7 @@ describe("Crowdsale - calculation & precision", function () {
   it("HLT -> USDT -> HLT floors to nearest multiple (no precision gain)", async function () {
     const { crowdsale } = await deployEnv();
 
-    const price = await crowdsale.tokensPerUSDT(); // e.g., 12
+    const price = await crowdsale.getTokenPrice(); // e.g., 12
     const unit = price.mul(ethers.BigNumber.from("1000000000000")); // tokensPerUSDT * 1e12
 
     // arbitrary HLT amount not necessarily aligned to unit (e.g., 123.456789 HLT)

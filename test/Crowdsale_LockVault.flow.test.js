@@ -2,16 +2,17 @@ const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
 /**
- * Crowdsale + LockVault end-to-end flow
- * - Deploy MockUSDT(6 decimals), HLTToken(18 decimals), LockVault, Crowdsale
- * - Fund Crowdsale with HLT, set vault on Crowdsale, set crowdsale on Vault
- * - Start crowdsale, buy with USDT, verify vault schedule & balances
- * - Before unlock claim should be zero, after 12 months claimAll transfers HLT to user
+ * Crowdsale + Token-level locking (no LockVault) end-to-end flow
+ * - Deploy MockUSDT(6), HLTToken(18), Crowdsale
+ * - Fund Crowdsale with HLT, set crowdsale on token, start crowdsale
+ * - Buy with USDT -> HLT transfers to buyer immediately, while token records a lock entry
+ * - Before unlock: buyer cannot transfer locked amount; but can transfer any non-locked tokens
+ * - After unlock: buyer can transfer all
  */
 
-describe("Crowdsale + LockVault - E2E", function () {
+describe("Crowdsale + TokenLock - E2E", function () {
   async function deployAll() {
-    const [owner, otherAccount, buyer] = await ethers.getSigners();
+    const [owner, otherAccount, buyer, receiver] = await ethers.getSigners();
 
     // Deploy MockUSDT (constructor expects only initialOwner)
     const MockUSDT = await ethers.getContractFactory("MockUSDT");
@@ -32,25 +33,32 @@ describe("Crowdsale + LockVault - E2E", function () {
     await crowdsale.deployed?.();
     await crowdsale.waitForDeployment?.();
 
-    // Deploy LockVault
-    const LockVault = await ethers.getContractFactory("LockVault");
-    const vault = await LockVault.deploy(token.address ?? (await token.getAddress()), owner.address);
-    await vault.deployed?.();
-    await vault.waitForDeployment?.();
+    // 绑定 crowdale 到 token
+    await (await token.connect(owner).setCrowdsaleContract(crowdsale.address ?? (await crowdsale.getAddress()))).wait();
 
-    // Wire Crowdsale <-> Vault
-    await (await crowdsale.connect(owner).setVault(vault.address ?? (await vault.getAddress()))).wait();
-    await (await vault.connect(owner).setCrowdsale(crowdsale.address ?? (await crowdsale.getAddress()))).wait();
-
-    // Fund Crowdsale with HLT (transfer some sale tokens to crowdsale)
+    // 为 Crowdale 充值售卖 HLT
     const saleFund = ethers.utils.parseUnits("1000000", 18); // 1,000,000 HLT for tests
     await (await token.connect(owner).transfer(crowdsale.address ?? (await crowdsale.getAddress()), saleFund)).wait();
 
-    return { owner, otherAccount, buyer, usdt, token, crowdsale, vault };
+    return { owner, otherAccount, buyer, receiver, usdt, token, crowdsale, lockDuration };
   }
 
-  it("should complete the full purchase -> lock -> claim flow", async function () {
-    const { owner, buyer, usdt, token, crowdsale, vault } = await deployAll();
+  // simple generic revert checker (avoid waffle matchers)
+  async function expectRevert(promise) {
+    let reverted = false;
+    try {
+      const tx = await promise;
+      await tx.wait?.();
+    } catch (e) {
+      reverted = true;
+    }
+    if (!reverted) {
+      throw new Error("Expected revert but the tx succeeded");
+    }
+  }
+
+  it("should complete purchase -> lock -> transfer constraints -> unlock flow", async function () {
+    const { owner, buyer, receiver, usdt, token, crowdsale, lockDuration } = await deployAll();
 
     // Owner starts crowdsale
     await (await crowdsale.connect(owner).startCrowdsale()).wait();
@@ -66,46 +74,47 @@ describe("Crowdsale + LockVault - E2E", function () {
     // Buy
     await (await crowdsale.connect(buyer).buyTokens(usdtAmount)).wait();
 
-    // Buyer should not receive HLT immediately
+    // Buyer should receive HLT immediately
     const buyerHLTAfter = await token.balanceOf(buyer.address);
-    expect(buyerHLTAfter.isZero()).to.be.true;
+    expect(buyerHLTAfter.toString()).to.equal(expectedHLT.toString());
 
-    // Vault should have received HLT
-    const vaultHLT = await token.balanceOf(vault.address ?? (await vault.getAddress()));
-    expect(vaultHLT.toString()).to.equal(expectedHLT.toString());
+    // Token-level lock should be recorded
+    const locks = await token.getLocks(buyer.address);
+    expect(locks.length).to.equal(1);
+    const lockedNow = await token.getLockedAmount(buyer.address);
+    expect(lockedNow.toString()).to.equal(expectedHLT.toString());
+    const unlockedNow = await token.getUnlockedAmount(buyer.address);
+    expect(unlockedNow.isZero()).to.be.true;
 
-    // Schedule exists and locked balance correct
-    const schedules = await vault.schedulesOf(buyer.address);
-    expect(schedules.length).to.equal(1);
-    const locked = await vault.getLockedBalance(buyer.address);
-    expect(locked.toString()).to.equal(expectedHLT.toString());
+    // Send some non-locked tokens to buyer (simulate transfer from owner not via crowdsale)
+    const extra = ethers.utils.parseUnits("50", 18);
+    await (await token.connect(owner).transfer(buyer.address, extra)).wait();
 
-    // Claimable should be zero before unlock
-    const claimableBefore = await vault.getClaimable(buyer.address);
-    expect(claimableBefore.isZero()).to.be.true;
+    // Now buyer should have some unlocked amount (= extra)
+    const unlockedAfterExtra = await token.getUnlockedAmount(buyer.address);
+    expect(unlockedAfterExtra.toString()).to.equal(extra.toString());
 
-    // Fast-forward time by 12 months + 1 day
-    const oneYear = 365 * 24 * 60 * 60;
-    await network.provider.send("evm_increaseTime", [oneYear + 1]);
+    // Buyer can transfer within unlocked amount
+    const transferAmt = ethers.utils.parseUnits("10", 18);
+    await (await token.connect(buyer).transfer(receiver.address, transferAmt)).wait();
+    const receiverBal = await token.balanceOf(receiver.address);
+    expect(receiverBal.toString()).to.equal(transferAmt.toString());
+
+    // But cannot transfer more than unlocked (expected revert)
+    const tryOver = expectedHLT; // equals locked amount right now
+    await expectRevert(token.connect(buyer).transfer(receiver.address, tryOver));
+
+    // Fast-forward time by lockDuration + 1
+    await network.provider.send("evm_increaseTime", [lockDuration + 1]);
     await network.provider.send("evm_mine");
 
-    // Now claimable equals locked
-    const claimableAfter = await vault.getClaimable(buyer.address);
-    expect(claimableAfter.toString()).to.equal(expectedHLT.toString());
-
-    // Claim all
-    await (await vault.connect(buyer).claimAll()).wait();
-
-    // HLT should be transferred to buyer
-    const buyerHLTFinal = await token.balanceOf(buyer.address);
-    expect(buyerHLTFinal.toString()).to.equal(expectedHLT.toString());
-
-    // Vault should be reduced
-    const vaultHLTAfter = await token.balanceOf(vault.address ?? (await vault.getAddress()));
-    expect(vaultHLTAfter.isZero()).to.be.true;
-
-    // Locked balance now zero
-    const lockedAfter = await vault.getLockedBalance(buyer.address);
+    // Now locked becomes zero; user can transfer freely
+    const lockedAfter = await token.getLockedAmount(buyer.address);
     expect(lockedAfter.isZero()).to.be.true;
+
+    const fullTransfer = await token.balanceOf(buyer.address);
+    await (await token.connect(buyer).transfer(receiver.address, fullTransfer)).wait();
+    const buyerFinal = await token.balanceOf(buyer.address);
+    expect(buyerFinal.isZero()).to.be.true;
   });
 });

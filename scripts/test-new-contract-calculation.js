@@ -20,9 +20,9 @@ async function main() {
     const mockUSDT = MockUSDT.attach(mockUSDTAddress);
     
     try {
-        // 检查 tokensPerUSDT 值
-        const tokensPerUSDT = await crowdsale.tokensPerUSDT();
-        console.log(`tokensPerUSDT: ${tokensPerUSDT}`);
+        // 检查价格
+        const price = await crowdsale.getTokenPrice();
+        console.log(`getTokenPrice: ${price.toString()}`);
         
         // 模拟计算
         const usdtAmount = ethers.utils.parseUnits('13', 6); // 13 USDT
@@ -30,21 +30,19 @@ async function main() {
         console.log(`USDT数量 (wei): ${usdtAmount}`);
         
         // 使用合约的计算逻辑
-        // hltAmount = (_usdtAmount * tokensPerUSDT * 1e18) / 1e6
-        const hltAmount = usdtAmount.mul(tokensPerUSDT).mul(ethers.utils.parseUnits('1', 18)).div(ethers.utils.parseUnits('1', 6));
+        const hltAmount = await crowdsale.calculateHLTAmount(usdtAmount);
         const hltDisplay = ethers.utils.formatUnits(hltAmount, 18);
         
         console.log(`计算过程:`);
-        console.log(`hltAmount = (${usdtAmount} * ${tokensPerUSDT} * 10^18) / 10^6`);
-        console.log(`hltAmount = ${hltAmount}`);
+        console.log(`hltAmount = calculateHLTAmount(${usdtAmount}) => ${hltAmount}`);
         console.log(`HLT数量 (标准): ${hltDisplay}`);
         
-        // 验证
-        const expectedHLT = 13 * Number(tokensPerUSDT);
+        // 验证（基于价格的期望值）
+        const expectedHLT = (13 * Number(price.toString())).toString();
         console.log(`\n验证:`);
-        console.log(`期望HLT: ${expectedHLT}`);
+        console.log(`期望HLT(按价格): ${expectedHLT}`);
         console.log(`实际HLT: ${hltDisplay}`);
-        console.log(`计算正确: ${Number(hltDisplay) === expectedHLT}`);
+        console.log(`计算正确: ${Number(hltDisplay) === Number(expectedHLT)}`);
         
         // 检查众筹状态
         const crowdsaleActive = await crowdsale.crowdsaleActive();

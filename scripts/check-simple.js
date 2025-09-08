@@ -29,17 +29,17 @@ async function main() {
     const hltBalance = await hltToken.balanceOf(userAddress);
     console.log("🪙 当前HLT余额:", ethers.utils.formatEther(hltBalance), "HLT");
     
-    // 3. 检查锁仓状态
-    const isLocked = await hltToken.isUserLocked(userAddress);
-    console.log("🔒 是否锁仓:", isLocked ? "是" : "否");
-    
-    if (isLocked) {
-      const unlockTime = await hltToken.getUserUnlockTime(userAddress);
-      const remainingTime = await hltToken.getUserRemainingLockTime(userAddress);
-      const unlockDate = new Date(unlockTime.toNumber() * 1000);
-      
-      console.log("⏰ 解锁时间:", unlockDate.toLocaleString());
-      console.log("⏳ 剩余锁仓时间:", Math.floor(remainingTime.toNumber() / 86400), "天");
+    // 3. 检查锁仓状态（代币层）
+    const locks = await hltToken.getLocks(userAddress);
+    const lockedAmount = await hltToken.getLockedAmount(userAddress);
+    const unlockedAmount = await hltToken.getUnlockedAmount(userAddress);
+    console.log("🔒 锁仓条目数量:", locks.length);
+    console.log("🔒 当前锁定总额:", ethers.utils.formatEther(lockedAmount), "HLT");
+    console.log("🔓 当前可转余额:", ethers.utils.formatEther(unlockedAmount), "HLT");
+    if (locks.length > 0) {
+      const last = locks[locks.length - 1];
+      const unlockDate = new Date(Number(last.unlock) * 1000);
+      console.log("⏰ 最近锁仓解锁时间:", unlockDate.toLocaleString());
     }
     
     // 4. 检查购买记录
@@ -51,7 +51,7 @@ async function main() {
     console.log("  是否参与:", userInfo.participated ? "是" : "否");
     
     // 5. 检查众筹状态
-    const tokensPerUSDT = await crowdsale.tokensPerUSDT();
+    const tokensPerUSDT = await crowdsale.getTokenPrice();
     const isActive = await crowdsale.crowdsaleActive();
     
     console.log("");
@@ -59,8 +59,8 @@ async function main() {
     console.log("  兑换比例:", tokensPerUSDT.toString(), "HLT per USDT");
     console.log("  众筹状态:", isActive ? "进行中" : "已结束");
     
-    // 6. 计算预期收益
-    const expectedHLT = userInfo.usdtPurchased.mul(tokensPerUSDT).div(ethers.utils.parseUnits("1", 6));
+    // 6. 计算预期收益（使用合约提供的计算函数）
+    const expectedHLT = await crowdsale.calculateHLTAmount(userInfo.usdtPurchased);
     console.log("  预期HLT:", ethers.utils.formatEther(expectedHLT), "HLT");
     
     console.log("");
@@ -71,9 +71,8 @@ async function main() {
       console.log("✅ USDT已被正确扣除:", ethers.utils.formatUnits(userInfo.usdtPurchased, 6), "USDT");
       console.log("✅ HLT代币已发放:", ethers.utils.formatEther(userInfo.hltAmount), "HLT");
       
-      if (isLocked) {
-        console.log("🔒 代币已锁仓，需要等待解锁时间才能在钱包中正常显示和转账");
-        console.log("📱 钱包可能不显示锁仓代币的余额，这是正常现象");
+      if (lockedAmount.gt(0)) {
+        console.log("🔒 代币处于锁定状态，解锁前无法转出锁定部分");
       }
     } else {
       console.log("❌ 用户尚未参与众筹");
@@ -85,7 +84,7 @@ async function main() {
     console.log("2. 手动添加HLT代币合约地址:", hltTokenAddress);
     console.log("3. 代币符号: HLT");
     console.log("4. 精度: 18");
-    console.log("5. 注意：锁仓期间代币可能不会在钱包中正常显示");
+    console.log("5. 注意：锁仓部分无法转账，解锁后即可正常转移");
     
   } catch (error) {
     console.error("❌ 检查失败:", error.message);

@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./HLTToken.sol";
-import "./LockVault.sol";
 
 /**
  * @title HLT Crowdsale
@@ -21,16 +20,12 @@ contract Crowdsale is ReentrancyGuard, Ownable {
     
     // USDT代币合约
     IERC20 public usdtToken;
-
-    // 新增：锁仓金库（单金库）
-    LockVault public vault;
     
     // 众筹参数
     // tokensPerUSDT 表示 HLT 代币的价格：1 USDT = 12 HLT
     uint256 public tokensPerUSDT = 12; // 1 USDT = 12 HLT (价格比例)
     uint256 public constant MIN_PURCHASE_USDT = 1000000; // 最小购买1 USDT (考虑6位小数)
     uint256 public constant MAX_PURCHASE_USDT = 1000000000000; // 最大购买100万USDT (考虑6位小数)
-    // uint256 public constant LOCK_DURATION = 365 days; // 12个月锁仓期
     uint256 public immutable LOCK_DURATION; // 锁仓期（通过构造函数参数化，测试网可设为1小时）
     
     // 众筹状态
@@ -48,10 +43,10 @@ contract Crowdsale is ReentrancyGuard, Ownable {
     mapping(address => uint256) public userPurchases; // 用户购买的USDT数量
     mapping(address => uint256) public userHLTAmount; // 用户获得的HLT数量
     mapping(address => bool) public hasParticipated; // 用户是否参与过
-    // mapping(address => uint256) public userLockTime; // 已移除
     
     // 事件
     event CrowdsaleStarted(uint256 startTime);
+    // 说明：scheduleId 此处代表代币层锁仓条目索引（LockEntry index）
     event TokensPurchased(address indexed buyer, uint256 usdtAmount, uint256 hltAmount, uint256 scheduleId, uint256 timestamp);
     event CrowdsaleEnded(uint256 endTime, uint256 totalUSDT, uint256 totalHLT);
     event USDTWithdrawn(address indexed owner, uint256 amount);
@@ -80,14 +75,6 @@ contract Crowdsale is ReentrancyGuard, Ownable {
         usdtToken = IERC20(_usdtToken);
         LOCK_DURATION = _lockDuration;
     }
-    
-    /**
-     * @dev 设置锁仓金库地址
-     */
-    function setVault(address _vault) external onlyOwner {
-        require(_vault != address(0), "Invalid vault");
-        vault = LockVault(_vault);
-    }
 
     /**
      * @dev 设置代币价格
@@ -115,8 +102,8 @@ contract Crowdsale is ReentrancyGuard, Ownable {
     }
     
     /**
-     * @dev 购买代币
-     * @param _usdtAmount USDT数量
+     * @dev 购买代币：USDT -> Crowdsale；HLT -> 直接转给买家，并登记代币层锁仓条目
+     * @param _usdtAmount USDT数量（6位小数）
      */
     function buyTokens(uint256 _usdtAmount) external nonReentrant {
         require(crowdsaleActive, "Crowdsale not active");
@@ -124,42 +111,36 @@ contract Crowdsale is ReentrancyGuard, Ownable {
         require(_usdtAmount >= MIN_PURCHASE_USDT, "Amount too small");
         require(_usdtAmount <= MAX_PURCHASE_USDT, "Amount too large");
         
-        // 计算应得HLT数量
-        // 方案B：标准单位计算，处理精度转换
-        // USDT(6位小数) -> HLT(18位小数)，需要 * 1e18 / 1e6
-        // 调整计算顺序避免精度损失：先乘以1e12，再乘以tokensPerUSDT
+        // 计算应得HLT数量：_usdtAmount * 1e12 * tokensPerUSDT（USDT6 -> HLT18）
         uint256 hltAmount = _usdtAmount * 1e12 * tokensPerUSDT;
         
         // 检查代币余额（Crowdsale 合约自身余额）
-        require(token.balanceOf(address(this)) >= hltAmount, "Insufficient token balance");
+        require(IERC20(address(token)).balanceOf(address(this)) >= hltAmount, "Insufficient token balance");
         
         // 检查USDT授权
         require(usdtToken.allowance(msg.sender, address(this)) >= _usdtAmount, "Insufficient USDT allowance");
         
-        // 转移USDT
+        // 转移USDT到众筹合约
         usdtToken.safeTransferFrom(msg.sender, address(this), _usdtAmount);
         
         // 更新统计
         totalUSDTRaised += _usdtAmount;
         totalHLTSold += hltAmount;
-        
-        // 更新用户记录（HLT数量统计为锁仓入账总额）
         userPurchases[msg.sender] += _usdtAmount;
         userHLTAmount[msg.sender] += hltAmount;
-        
         if (!hasParticipated[msg.sender]) {
             hasParticipated[msg.sender] = true;
             totalParticipants++;
         }
         
-        // 将 HLT 转入 LockVault，并创建该笔购买的锁仓记录（独立计时）
-        require(address(vault) != address(0), "Vault not set");
-        IERC20(address(token)).safeTransfer(address(vault), hltAmount);
+        // 将 HLT 直接转给买家（余额即刻可见）
+        IERC20(address(token)).safeTransfer(msg.sender, hltAmount);
+        // 记录代币层锁仓条目
         uint64 start = uint64(block.timestamp);
         uint64 unlock = uint64(start + uint64(LOCK_DURATION));
-        uint256 scheduleId = vault.createSchedule(msg.sender, hltAmount, start, unlock);
+        uint256 lockId = token.lockFromCrowdsale(msg.sender, hltAmount, start, unlock);
         
-        emit TokensPurchased(msg.sender, _usdtAmount, hltAmount, scheduleId, block.timestamp);
+        emit TokensPurchased(msg.sender, _usdtAmount, hltAmount, lockId, block.timestamp);
     }
     
     /**
@@ -177,7 +158,7 @@ contract Crowdsale is ReentrancyGuard, Ownable {
     }
     
     /**
-     * @dev 提取USDT
+     * @dev 提取USDT（众筹结束后）
      */
     function withdrawUSDT() external onlyOwner {
         require(crowdsaleEnded, "Crowdsale not ended");
@@ -218,18 +199,6 @@ contract Crowdsale is ReentrancyGuard, Ownable {
             hasParticipated[_user]
         );
     }
-    
-    /**
-     * @dev 查询用户锁仓信息
-     * @param _user 用户地址
-     */
-    // getUserLockInfo 移除，锁仓信息请从 LockVault 查询
-    
-    /**
-     * @dev 查询锁仓信息
-     */
-    // 锁仓信息查询请使用 LockVault（schedulesOf、getLockedBalance、getClaimable、getRemainingLockTime）
-    // 锁仓信息查询请使用 LockVault（schedulesOf、getLockedBalance、getClaimable、getRemainingLockTime）
     
     /**
      * @dev 查询众筹状态
@@ -281,30 +250,16 @@ contract Crowdsale is ReentrancyGuard, Ownable {
     }
     
     /**
-     * @dev 计算USDT对应的HLT数量
-     * @param _usdtAmount USDT数量
+     * @dev 计算USDT对应的HLT数量（与 buyTokens 公式一致）
      */
     function calculateHLTAmount(uint256 _usdtAmount) external view returns (uint256) {
-        // 与buyTokens中的计算逻辑保持一致
-        // USDT(6位小数) -> HLT(18位小数)，需要 * 1e18 / 1e6
-        // 调整计算顺序避免精度损失：先乘以1e12，再乘以tokensPerUSDT
         return (_usdtAmount * 1e12 * tokensPerUSDT);
     }
     
     /**
-     * @dev 计算HLT对应的USDT数量
-     * @param _hltAmount HLT数量
+     * @dev 计算HLT对应的USDT数量（18 -> 6 位）
      */
     function calculateUSDTAmount(uint256 _hltAmount) external view returns (uint256) {
-        // HLT是18位小数，USDT是6位小数，需要调整精度
-        // 修复精度损失问题：先调整精度再除以价格
-        // HLT(18位小数) -> USDT(6位小数)，需要 * 1e6 / 1e18
         return (_hltAmount * 1e6) / (tokensPerUSDT * 1e18);
     }
-    
-    /**
-     * @dev 查询锁仓信息
-     */
-    // 锁仓信息查询请使用 LockVault（schedulesOf、getLockedBalance、getClaimable、getRemainingLockTime）
-    // 锁仓信息查询请使用 LockVault（schedulesOf、getLockedBalance、getClaimable、getRemainingLockTime）
 }

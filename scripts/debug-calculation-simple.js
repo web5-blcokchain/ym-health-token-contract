@@ -22,14 +22,14 @@ async function main() {
     
     // 测试计算
     const usdtAmount = 1000000; // 1 USDT (6位小数)
-    const tokensPerUSDT = await crowdsale.tokensPerUSDT();
+    const price = await crowdsale.getTokenPrice();
     
     console.log(`USDT金额: ${usdtAmount} (原始值)`);
     console.log(`USDT金额: ${usdtAmount / 1e6} USDT (格式化)`);
-    console.log(`tokensPerUSDT: ${tokensPerUSDT}`);
+    console.log(`getTokenPrice: ${price.toString()}`);
     
-    // 手动计算
-    const manualCalc = ethers.BigNumber.from(usdtAmount).mul(tokensPerUSDT).mul(ethers.utils.parseEther('1')).div(1e6);
+    // 手动计算（按价格）
+    const manualCalc = ethers.BigNumber.from(usdtAmount).mul(price).mul(ethers.utils.parseEther('1')).div(1e6);
     console.log(`手动计算结果: ${manualCalc.toString()} wei`);
     console.log(`手动计算结果: ${ethers.utils.formatEther(manualCalc)} HLT`);
     

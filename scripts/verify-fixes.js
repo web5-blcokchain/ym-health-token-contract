@@ -105,14 +105,21 @@ async function main() {
     console.log(`计算一致: ${predictedHLT.eq(actualHLT) ? '✅' : '❌'}`);
     console.log();
     
-    // 测试4: 验证transferOtherTokens修复
-    console.log('🔄 === 测试4: 验证transferOtherTokens修复 ===');
+    // 检查锁仓条目与余额可用性
+    const locks = await hltToken.getLocks(user1.address);
+    const lockedAmount = await hltToken.getLockedAmount(user1.address);
+    const unlockedAmount = await hltToken.getUnlockedAmount(user1.address);
+    console.log('🔒 锁仓条目数量:', locks.length);
+    console.log('🔒 当前锁定总额:', ethers.utils.formatEther(lockedAmount), 'HLT');
+    console.log('🔓 当前可转余额:', ethers.utils.formatEther(unlockedAmount), 'HLT');
+    if (locks.length > 0) {
+        const last = locks[locks.length - 1];
+        console.log('⏰ 最近锁仓: amount=', ethers.utils.formatEther(last.amount), 'HLT', ' unlock=', new Date(Number(last.unlock) * 1000).toLocaleString());
+    }
     
-    // 检查owner是否被锁仓（如果参与了众筹）（otherAccount已在构造函数中设置为user1）
-    const ownerLocked = await hltToken.isUserLocked(deployer.address);
-    console.log(`Owner锁仓状态: ${ownerLocked ? '🔒 已锁仓' : '🔓 未锁仓'}`);
+    // 测试4: 验证transferOtherTokens
+    console.log('🔄 === 测试4: 验证transferOtherTokens ===');
     
-    // 尝试转移其他代币
     try {
         const otherBalanceBefore = await hltToken.balanceOf(user1.address);
         const expectedOtherAmount = await hltToken.OTHER_AMOUNT();

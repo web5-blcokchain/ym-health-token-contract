@@ -1,146 +1,121 @@
-const { ethers } = require("hardhat");
+const { ethers, network, run } = require("hardhat");
+require("dotenv").config();
 
 async function main() {
-    console.log("🚀 === 开始部署到 BSC 测试网 ===\n");
+  const tokenName = process.env.TOKEN_NAME || "HealthLife Token";
+  const tokenSymbol = process.env.TOKEN_SYMBOL || "HLT";
+  let usdtAddress = process.env.USDT_ADDRESS; // 若未设置且为 bscTestnet，则使用固定 MockUSDT
 
-    // 获取部署账户
-    const [deployer] = await ethers.getSigners();
-    console.log("部署账户:", deployer.address);
-    console.log("账户余额:", ethers.utils.formatEther(await deployer.getBalance()), "BNB\n");
+  // 依据网络选择锁仓时长默认值：测试网=1h，主网=365d
+  const ONE_HOUR = 3600;
+  const ONE_YEAR = 365 * 24 * 3600;
+  let lockDuration;
+  if (process.env.CROWDSALE_LOCK_DURATION) {
+    lockDuration = parseInt(process.env.CROWDSALE_LOCK_DURATION, 10);
+  } else if (network.name === "bscMainnet" || network.name === "mainnet") {
+    lockDuration = ONE_YEAR;
+    console.log(`[提示] 未提供 CROWDSALE_LOCK_DURATION，检测到网络 ${network.name}，已使用默认锁仓 365 天 (${ONE_YEAR} 秒)`);
+  } else {
+    lockDuration = ONE_HOUR;
+    console.log(`[提示] 未提供 CROWDSALE_LOCK_DURATION，检测到网络 ${network.name}，已使用默认锁仓 1 小时 (${ONE_HOUR} 秒)`);
+  }
 
-    // BSC测试网配置
-    const tokenName = "HealthLife Token";
-    const tokenSymbol = "HLT";
-    // 允许通过环境变量覆盖 USDT 地址
-    const usdtAddress = process.env.USDT_ADDRESS || "0xeb4C53574edBF035FfBAF647b3E957b4FB88CD6B"; // MockUSDT deployed on BSC Testnet
-    console.log("使用的 USDT 地址:", usdtAddress, process.env.USDT_ADDRESS ? "(来自环境变量 USDT_ADDRESS)" : "(使用脚本内置 MockUSDT 地址)");
-    // 使用一个不同的地址作为其他账号（接收7600万代币）
-    const otherAccountAddress = process.env.OTHER_ACCOUNT_ADDRESS || "0x620bdC24abCf45F8Ea1D99fEF2EC5Aae7CD300A7";
+  const saleFundAmount = process.env.SALE_FUND_AMOUNT || "1000000"; // 预充值给众筹的 HLT 数量（整数，单位=HLT）
 
-    // 新增：锁仓时长（秒），默认 3600（1小时），可通过 CROWDSALE_LOCK_DURATION 覆盖
-    let lockDuration = 3600;
-    if (process.env.CROWDSALE_LOCK_DURATION) {
-        const parsed = parseInt(process.env.CROWDSALE_LOCK_DURATION, 10);
-        if (!Number.isNaN(parsed) && parsed > 0) {
-            lockDuration = parsed;
-        } else {
-            console.warn(`⚠️ 无效的 CROWDSALE_LOCK_DURATION: ${process.env.CROWDSALE_LOCK_DURATION}，将使用默认值 3600`);
-        }
-    }
-    console.log(`锁仓时长: ${lockDuration} 秒${lockDuration === 3600 ? " (默认1小时，测试快速回归)" : ""}`);
+  // 测试网默认 USDT 地址（用户指定的早期 MockUSDT 地址）
+  const TESTNET_DEFAULT_USDT = "0xeb4C53574edBF035FfBAF647b3E957b4FB88CD6B";
 
-    try {
-        console.log("=== 部署 HLTToken 合约 ===");
-        const HLTToken = await ethers.getContractFactory("HLTToken");
-        console.log("正在部署 HLTToken...");
-        
-        const hltToken = await HLTToken.deploy(
-            tokenName,
-            tokenSymbol,
-            deployer.address,
-            otherAccountAddress
-        );
-        
-        console.log("等待交易确认...");
-        await hltToken.deployed();
-        const hltTokenAddress = hltToken.address;
-        console.log("✅ HLTToken 部署成功，地址:", hltTokenAddress);
+  if (!usdtAddress && network.name === "bscTestnet") {
+    usdtAddress = TESTNET_DEFAULT_USDT;
+    console.log(`[提示] 未提供 USDT_ADDRESS，检测到网络 ${network.name}，已使用默认 MockUSDT: ${usdtAddress}`);
+  }
 
-        console.log("\n=== 部署 Crowdsale 合约 ===");
-        const Crowdsale = await ethers.getContractFactory("Crowdsale");
-        console.log("正在部署 Crowdsale...");
-        
-        const crowdsale = await Crowdsale.deploy(
-            hltTokenAddress,
-            usdtAddress,
-            deployer.address,
-            lockDuration
-        );
-        
-        console.log("等待交易确认...");
-        await crowdsale.deployed();
-        const crowdsaleAddress = crowdsale.address;
-        console.log("✅ Crowdsale 部署成功，地址:", crowdsaleAddress);
+  if (!usdtAddress) {
+    throw new Error("缺少 USDT_ADDRESS 环境变量（主网/其他网络必须显式提供）");
+  }
 
-        // 新增：部署 LockVault 并与 Crowdsale 互相绑定
-        console.log("\n=== 部署 LockVault 合约 ===");
-        const LockVault = await ethers.getContractFactory("LockVault");
-        console.log("正在部署 LockVault...");
-        const vault = await LockVault.deploy(hltTokenAddress, deployer.address);
-        console.log("等待交易确认...");
-        await vault.deployed();
-        const vaultAddress = vault.address;
-        console.log("✅ LockVault 部署成功，地址:", vaultAddress);
+  const [deployer] = await ethers.getSigners();
+  console.log("部署者:", deployer.address);
+  console.log("网络:", network.name);
+  const lockInfo = lockDuration === ONE_HOUR ? "(测试默认1小时)" : lockDuration === ONE_YEAR ? "(正式建议365天)" : "";
+  console.log(`锁仓时长: ${lockDuration} 秒 ${lockInfo}`);
 
-        console.log("\n=== 绑定 Crowdsale ↔ LockVault ===");
-        console.log("设置 Crowdsale.setVault(vault)...");
-        const setVaultTx = await crowdsale.setVault(vaultAddress);
-        await setVaultTx.wait();
-        console.log("✅ 已在 Crowdsale 设置 Vault 地址");
+  if ((network.name === "bscMainnet" || network.name === "mainnet") && lockDuration < ONE_YEAR) {
+    console.warn("[警告] 当前为主网部署，但锁仓时长 < 365 天，请确认是否符合上线策略！");
+  }
 
-        console.log("设置 LockVault.setCrowdsale(crowdsale)...");
-        const setCrowdsaleOnVaultTx = await vault.setCrowdsale(crowdsaleAddress);
-        await setCrowdsaleOnVaultTx.wait();
-        console.log("✅ 已在 LockVault 设置 Crowdsale 地址");
+  // 处理 otherAccount（固定地址，需与 owner 不同且非零）
+  const FIXED_OTHER_ACCOUNT = "0xaeec208c1fdE4636570E2C6E72A256c53c774fac";
+  const otherAccount = FIXED_OTHER_ACCOUNT;
+  if (otherAccount.toLowerCase() === deployer.address.toLowerCase()) {
+    throw new Error("OTHER_ACCOUNT 固定地址与部署者地址相同，请更换部署者私钥或调整策略。");
+  }
+  console.log("使用固定 OTHER_ACCOUNT:", otherAccount);
 
-        console.log("\n=== 配置合约权限 ===");
+  try {
+    console.log("=== 部署 HLTToken 合约 ===");
+    const HLTToken = await ethers.getContractFactory("HLTToken");
+    console.log("正在部署 HLTToken...");
 
-        // 设置众筹合约地址（HLTToken -> Crowdsale）
-        console.log("设置众筹合约地址...");
-        const setCrowdsaleTx = await hltToken.setCrowdsaleContract(crowdsaleAddress);
-        await setCrowdsaleTx.wait();
-        console.log("✅ 已设置众筹合约地址");
+    const hltToken = await HLTToken.deploy(
+      tokenName,
+      tokenSymbol,
+      deployer.address,
+      otherAccount // 接收 OTHER_AMOUNT 的账号（需与 owner 不同）
+    );
 
-        // 给众筹合约分配代币（售卖额度）
-        console.log("给众筹合约分配代币...");
-        const saleAmount = await hltToken.SALE_AMOUNT();
-        const transferTx = await hltToken.transfer(crowdsaleAddress, saleAmount);
-        await transferTx.wait();
-        console.log("✅ 已给众筹合约分配代币:", ethers.utils.formatEther(saleAmount), "HLT");
+    console.log("等待交易确认...");
+    await hltToken.deployed();
+    const hltTokenAddress = hltToken.address;
+    console.log("✅ HLTToken 部署成功，地址:", hltTokenAddress);
 
-        // 转移其他代币到指定账号
-        console.log("\n=== 转移其他代币 ===");
-        const transferOtherTx = await hltToken.transferOtherTokens();
-        await transferOtherTx.wait();
-        console.log("✅ 已转移其他代币到账号:", otherAccountAddress);
+    console.log("\n=== 部署 Crowdsale 合约 ===");
+    const Crowdsale = await ethers.getContractFactory("Crowdsale");
+    console.log("正在部署 Crowdsale...");
 
-        console.log("\n🎉 === 部署完成 ===");
-        console.log("📋 合约地址:");
-        console.log("   HLTToken:", hltTokenAddress);
-        console.log("   Crowdsale:", crowdsaleAddress);
-        console.log("   LockVault:", vaultAddress);
-        console.log("   USDT:", usdtAddress);
-        console.log("   其他账号:", otherAccountAddress);
-        console.log(`   锁仓时长(秒): ${lockDuration}`);
+    const crowdsale = await Crowdsale.deploy(
+      hltTokenAddress,
+      usdtAddress,
+      deployer.address,
+      lockDuration
+    );
 
-        console.log("\n🔗 BSC测试网浏览器链接:");
-        console.log("   HLTToken: https://testnet.bscscan.com/address/" + hltTokenAddress);
-        console.log("   Crowdsale: https://testnet.bscscan.com/address/" + crowdsaleAddress);
-        console.log("   LockVault: https://testnet.bscscan.com/address/" + vaultAddress);
-        console.log("   USDT: https://testnet.bscscan.com/address/" + usdtAddress);
+    console.log("等待交易确认...");
+    await crowdsale.deployed();
+    const crowdsaleAddress = crowdsale.address;
+    console.log("✅ Crowdsale 部署成功，地址:", crowdsaleAddress);
 
-        console.log("\n📝 验证命令:");
-        console.log(`npx hardhat verify --network bscTestnet ${hltTokenAddress} "${tokenName}" "${tokenSymbol}" ${deployer.address} ${otherAccountAddress}`);
-        console.log(`npx hardhat verify --network bscTestnet ${crowdsaleAddress} ${hltTokenAddress} ${usdtAddress} ${deployer.address} ${lockDuration}`);
-        console.log(`npx hardhat verify --network bscTestnet ${vaultAddress} ${hltTokenAddress} ${deployer.address}`);
+    console.log("\n=== 绑定众筹合约到代币（setCrowdsaleContract） ===");
+    await (await hltToken.connect(deployer).setCrowdsaleContract(crowdsaleAddress)).wait();
+    console.log("✅ 已设置 crowdsaleContract ->", crowdsaleAddress);
 
-        console.log("\nℹ️ 使用 1 小时锁仓部署示例:");
-        console.log("   USDT_ADDRESS=0x<测试网USDT地址> CROWDSALE_LOCK_DURATION=3600 npx hardhat run scripts/deploy-bsc-testnet-simple.js --network bscTestnet");
+    // 给众筹合约转入待售代币额度
+    const saleFundWei = ethers.utils.parseUnits(saleFundAmount, 18);
+    console.log(`\n=== 为 Crowdsale 合约充值待售 HLT：${saleFundAmount} HLT ===`);
+    await (await hltToken.connect(deployer).transfer(crowdsaleAddress, saleFundWei)).wait();
+    console.log("✅ 已向 Crowdsale 转入 HLT，金额:", saleFundAmount, "HLT");
 
-        console.log("\n🚀 下一步操作:");
-        console.log("1. 验证合约");
-        console.log("2. 调用 crowdsale.startCrowdsale() 开始众筹");
-        console.log("3. 前端通过 crowdsale.vault() 读取 Vault 地址，进行锁仓查询与领取");
+    console.log("\n合约地址信息：");
+    console.log("HLTToken:", hltTokenAddress);
+    console.log("Crowdsale:", crowdsaleAddress);
+    console.log("USDT:", usdtAddress);
+    console.log("OTHER_ACCOUNT:", otherAccount);
 
-    } catch (error) {
-        console.error("❌ 部署失败:", error.message);
-        throw error;
-    }
+    console.log("\n验证命令参考：");
+    console.log(`npx hardhat verify --network ${network.name} ${hltTokenAddress} "${tokenName}" "${tokenSymbol}" ${deployer.address} ${otherAccount}`);
+    console.log(`npx hardhat verify --network ${network.name} ${crowdsaleAddress} ${hltTokenAddress} ${usdtAddress} ${deployer.address} ${lockDuration}`);
+
+  } catch (e) {
+    console.error("部署失败:", e);
+    process.exit(1);
+  }
 }
 
-main()
-    .then(() => process.exit(0))
-    .catch((error) => {
-        console.error("部署失败:", error);
-        process.exit(1);
-    });
+if (require.main === module) {
+  main().then(() => process.exit(0)).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
+
+module.exports = { main };

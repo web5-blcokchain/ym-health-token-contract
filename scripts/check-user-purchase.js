@@ -29,17 +29,17 @@ async function main() {
     const hltBalance = await hltToken.balanceOf(userAddress);
     console.log("🪙 HLT余额:", ethers.utils.formatEther(hltBalance), "HLT");
     
-    // 3. 检查锁仓状态
-    const isLocked = await hltToken.isUserLocked(userAddress);
-    console.log("🔒 是否锁仓:", isLocked ? "是" : "否");
-    
-    if (isLocked) {
-      const unlockTime = await hltToken.getUserUnlockTime(userAddress);
-      const remainingTime = await hltToken.getUserRemainingLockTime(userAddress);
-      const unlockDate = new Date(unlockTime.toNumber() * 1000);
-      
-      console.log("⏰ 解锁时间:", unlockDate.toLocaleString());
-      console.log("⏳ 剩余锁仓时间:", Math.floor(remainingTime.toNumber() / 86400), "天");
+    // 3. 检查锁仓状态（代币层）
+    const locks = await hltToken.getLocks(userAddress);
+    const lockedAmount = await hltToken.getLockedAmount(userAddress);
+    const unlockedAmount = await hltToken.getUnlockedAmount(userAddress);
+    console.log("🔒 锁仓条目数量:", locks.length);
+    console.log("🔒 当前锁定总额:", ethers.utils.formatEther(lockedAmount), "HLT");
+    console.log("🔓 当前可转余额:", ethers.utils.formatEther(unlockedAmount), "HLT");
+    if (locks.length > 0) {
+      const last = locks[locks.length - 1];
+      const unlockDate = new Date(Number(last.unlock) * 1000);
+      console.log("⏰ 最近锁仓解锁时间:", unlockDate.toLocaleString());
     }
     
     // 4. 检查购买记录
@@ -50,7 +50,7 @@ async function main() {
     console.log("  获得HLT:", ethers.utils.formatEther(userInfo.hltAmount), "HLT");
     console.log("  是否参与:", userInfo.participated ? "是" : "否");
     
-    // 5. 查询购买事件
+    // 5. 查询购买事件（使用新的事件结构: buyer, usdtAmount, hltAmount, scheduleId, timestamp）
     console.log("");
     console.log("🔍 查询购买事件...");
     
@@ -59,18 +59,23 @@ async function main() {
     
     if (events.length > 0) {
       console.log("📋 找到", events.length, "笔购买记录:");
+      const allLocks = await hltToken.getLocks(userAddress);
       
       for (let i = 0; i < events.length; i++) {
         const event = events[i];
         const block = await event.getBlock();
         const date = new Date(block.timestamp * 1000);
+        const scheduleId = event.args.scheduleId?.toNumber?.() ?? Number(event.args.scheduleId);
+        const lockInfo = allLocks[scheduleId];
+        const unlockStr = lockInfo ? new Date(Number(lockInfo.unlock) * 1000).toLocaleString() : 'N/A';
         
         console.log(`\n  [${i + 1}] 交易哈希: ${event.transactionHash}`);
         console.log(`      区块号: ${event.blockNumber}`);
         console.log(`      时间: ${date.toLocaleString()}`);
         console.log(`      购买USDT: ${ethers.utils.formatUnits(event.args.usdtAmount, 6)} USDT`);
         console.log(`      获得HLT: ${ethers.utils.formatEther(event.args.hltAmount)} HLT`);
-        console.log(`      锁仓时间: ${new Date(event.args.lockTime.toNumber() * 1000).toLocaleString()}`);
+        console.log(`      锁仓条目ID: ${scheduleId}`);
+        console.log(`      解锁时间: ${unlockStr}`);
       }
     } else {
       console.log("❌ 未找到购买记录");

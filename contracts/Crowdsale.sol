@@ -162,13 +162,18 @@ contract Crowdsale is ReentrancyGuard, Ownable {
      */
     function withdrawUSDT() external onlyOwner {
         require(crowdsaleEnded, "Crowdsale not ended");
-        
         uint256 balance = usdtToken.balanceOf(address(this));
         require(balance > 0, "No USDT to withdraw");
-        
         usdtToken.safeTransfer(owner(), balance);
-        
         emit USDTWithdrawn(owner(), balance);
+    }
+
+    // 众筹结束后回收未售出的 HLT 到 owner
+    function withdrawUnsoldHLT() external onlyOwner {
+        require(crowdsaleEnded, "Crowdsale not ended");
+        uint256 balance = IERC20(address(token)).balanceOf(address(this));
+        require(balance > 0, "No HLT to withdraw");
+        IERC20(address(token)).safeTransfer(owner(), balance);
     }
     
     /**

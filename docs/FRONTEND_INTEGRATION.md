@@ -94,8 +94,8 @@ export const networks = {
 // 合约地址配置（以部署输出或 docs/部署信息.md 为准）
 export const addresses = {
   bscTestnet: {
-    HLTToken: '0xF7a84a11EB4FbA0c77Ac1779a11c48F1D18Bf35D', // 最新：请替换为实际部署地址（以 docs/部署信息.md 为准）
-    Crowdsale: '0xf8E6E83A5771470D95b7E12F733f1f35DfFc5047', // 最新：请替换为实际部署地址（以 docs/部署信息.md 为准）
+    HLTToken: '0x74f1ED24295F42682EEB4F4A36d264cdA40DB66e', // 最新：请替换为实际部署地址（以 docs/部署信息.md 为准）
+    Crowdsale: '0x42bD80016995Af0Ae1fDb18944e2817b184f485b', // 最新：请替换为实际部署地址（以 docs/部署信息.md 为准）
     USDT: '0xeb4C53574edBF035FfBAF647b3E957b4FB88CD6B' // 测试网固定 MockUSDT
   },
   bscMainnet: {
@@ -155,7 +155,9 @@ await usdt.approve(spender, amount); // 6 位小数
   - USDT 地址需可配置（使用主网真实 USDT，默认 0x55d3...7955，亦可传入环境覆盖）。
   - 锁仓时长固定为 365 天（31536000 秒），上线前必须确认参数无误。
 - 前端集成范围：
-+ 前端集成范围：
+### 前端集成范围 / 注意事项
+- OTHER_ACCOUNT 固定为 0xaeec208c1fdE4636570E2C6E72A256c53c774fac（测试网），仅用于初始代币分配
+- 单地址最多购买 10 次（产品/风控策略约束，合约未强制），前端请在下单前校验累计购买次数
    - 只读：查询众筹聚合数据、用户个人购买与锁仓状态（锁仓条目、已锁定、已解锁、可转额度）。
    - 交易：USDT 授权 + buyTokens 购买流程。
    - 状态提示：对常见回滚原因进行用户友好提示（见“错误处理”）。

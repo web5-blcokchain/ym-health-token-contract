@@ -101,7 +101,8 @@ contract HLTToken is ERC20, Ownable {
         uint256 total;
         uint256 nowTs = block.timestamp;
         for (uint256 i = 0; i < arr.length; i++) {
-            if (nowTs < arr[i].unlock) {
+            // 修正：仅当 start <= now < unlock 才计入锁仓
+            if (nowTs >= arr[i].start && nowTs < arr[i].unlock) {
                 total += uint256(arr[i].amount);
             }
         }
